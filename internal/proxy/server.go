@@ -35,14 +35,36 @@ func New(cfg *config.Config, metrics *telemetry.Metrics) *Server {
 }
 
 // RegisterRoutes attaches all proxy endpoints to mux.
+// /health is unauthenticated; all other routes require a valid bearer token
+// when server.api_key is set in config.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/v1/chat/completions", s.handleProxy)
-	mux.HandleFunc("/v1/messages", s.handleProxy)
+	auth := s.bearerAuth
+
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+	mux.HandleFunc("/v1/models", auth(s.handleModels))
+	mux.HandleFunc("/v1/chat/completions", auth(s.handleProxy))
+	mux.HandleFunc("/v1/messages", auth(s.handleProxy))
+}
+
+// bearerAuth wraps a handler with bearer token authentication.
+// If no api_key is configured the handler is returned unwrapped.
+func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
+	key := s.cfg.Server.APIKey
+	if key == "" {
+		return next
+	}
+	expected := "Bearer " + key
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != expected {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-proxy"`)
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // handleModels returns the list of configured virtual models.

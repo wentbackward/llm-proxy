@@ -12,9 +12,16 @@ var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
+type TLSConfig struct {
+	Cert string `yaml:"cert"` // path to certificate file
+	Key  string `yaml:"key"`  // path to private key file
+}
+
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host   string    `yaml:"host"`
+	Port   int       `yaml:"port"`
+	APIKey string    `yaml:"api_key"` // required bearer token for inbound requests
+	TLS    TLSConfig `yaml:"tls"`
 }
 
 type PrometheusConfig struct {

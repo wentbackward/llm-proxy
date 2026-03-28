@@ -58,9 +58,17 @@ func main() {
 
 	// ── Start ──────────────────────────────────────────────────────────────
 	go func() {
-		log.Printf("[llm-proxy] listening on %s", proxyAddr)
-		if err := proxyServer.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("proxy server: %v", err)
+		tls := cfg.Server.TLS
+		if tls.Cert != "" && tls.Key != "" {
+			log.Printf("[llm-proxy] listening on %s (TLS)", proxyAddr)
+			if err := proxyServer.ListenAndServeTLS(tls.Cert, tls.Key); err != http.ErrServerClosed {
+				log.Fatalf("proxy server: %v", err)
+			}
+		} else {
+			log.Printf("[llm-proxy] listening on %s", proxyAddr)
+			if err := proxyServer.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatalf("proxy server: %v", err)
+			}
 		}
 	}()
 

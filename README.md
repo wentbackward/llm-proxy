@@ -25,13 +25,33 @@ Route all your clients through a single proxy and swap the underlying model for 
 
 ```bash
 cp config.example.yaml config.yaml
-# Edit config.yaml — set your backends, API keys
+# Edit config.yaml — set your backends and API keys
 docker compose up -d
 ```
 
 Point your OpenAI SDK at `http://localhost:4000/v1` or your Anthropic SDK at `http://localhost:4000`. Everything else stays the same.
 
 Metrics are available at `http://localhost:9091/metrics`.
+
+### TLS with Tailscale
+
+If you're running on a Tailscale network, provision a cert for your node and point the proxy at it:
+
+```bash
+tailscale cert spark-01.your-tailnet.ts.net
+```
+
+Then in `config.yaml`:
+
+```yaml
+server:
+  api_key: "${PROXY_API_KEY}"
+  tls:
+    cert: /certs/spark-01.your-tailnet.ts.net.crt
+    key:  /certs/spark-01.your-tailnet.ts.net.key
+```
+
+Clients then connect to `https://spark-01.your-tailnet.ts.net:4000/v1` with `Authorization: Bearer <key>`.
 
 ## Configuration
 
