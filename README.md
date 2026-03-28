@@ -7,6 +7,8 @@
 
 A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI and Anthropic natively. Drop it between your app and any LLM provider to get structured observability — TTFT, token counts, request duration — with zero changes to your application code.
 
+Route all your clients through a single proxy and swap the underlying model for everyone with one config change — no redeployments, no client updates, no coordination.
+
 ## Features
 
 - **Protocol-aware passthrough** — understands OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) natively; forwards each in its own format with no translation required
