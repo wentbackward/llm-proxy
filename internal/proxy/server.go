@@ -67,12 +67,39 @@ func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleModels returns the list of configured virtual models.
+// handleModels forwards /v1/models to the first configured backend so clients
+// receive real metadata (context_length, etc.) from the upstream. If no
+// backends are configured or the upstream fails, it falls back to the static
+// virtual model list.
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	if len(s.cfg.Backends) > 0 {
+		backend := &s.cfg.Backends[0]
+		upURL := backend.BaseURL + "/v1/models"
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, nil)
+		if err == nil {
+			if backend.APIKey != "" {
+				req.Header.Set("Authorization", "Bearer "+backend.APIKey)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				defer resp.Body.Close()
+				w.Header().Set("Content-Type", "application/json")
+				io.Copy(w, resp.Body)
+				return
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+		}
+		log.Printf("[proxy] /v1/models upstream failed, falling back to static list")
+	}
+
+	// Fallback: return virtual model names only
 	type modelEntry struct {
 		ID      string `json:"id"`
 		Object  string `json:"object"`
