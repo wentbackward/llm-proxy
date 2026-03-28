@@ -1,6 +1,8 @@
 # llm-proxy
 
 [![CI](https://github.com/wentbackward/llm-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/wentbackward/llm-proxy/actions/workflows/ci.yml)
+[![Release](https://github.com/wentbackward/llm-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/wentbackward/llm-proxy/actions/workflows/release.yml)
+[![Docker](https://img.shields.io/badge/ghcr.io-wentbackward%2Fllm--proxy-blue?logo=docker)](https://github.com/wentbackward/llm-proxy/pkgs/container/llm-proxy)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wentbackward/llm-proxy)](https://goreportcard.com/report/github.com/wentbackward/llm-proxy)
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
