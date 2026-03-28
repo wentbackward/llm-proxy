@@ -42,14 +42,14 @@ routes:
     defaults:
       temperature: 0.7
       max_tokens: 4096
-    locked:
+    clamp:
       enable_thinking: true
   - virtual_model: agent
     backend: big
     real_model: "qwen-27b"
     defaults:
       temperature: 0.6
-    locked:
+    clamp:
       enable_thinking: true
   - virtual_model: auto
     auto_route:
@@ -77,13 +77,13 @@ func TestMergeParams_CallerOverridesDefaults(t *testing.T) {
 	assertFloat(t, result, "top_p", 0.9)
 }
 
-func TestMergeParams_LockedOverridesCaller(t *testing.T) {
+func TestMergeParams_ClampOverridesCaller(t *testing.T) {
 	defaults := map[string]interface{}{}
 	body := map[string]interface{}{"enable_thinking": false}
-	locked := map[string]interface{}{"enable_thinking": true}
-	result := mergeParams(defaults, body, locked)
+	clamp := map[string]interface{}{"enable_thinking": true}
+	result := mergeParams(defaults, body, clamp)
 	if result["enable_thinking"] != true {
-		t.Errorf("locked should override caller: got %v", result["enable_thinking"])
+		t.Errorf("clamp should override caller: got %v", result["enable_thinking"])
 	}
 }
 
@@ -191,13 +191,13 @@ func TestResolve_CallerOverridesDefault(t *testing.T) {
 	assertFloat(t, res.Params, "temperature", 0.1)
 }
 
-func TestResolve_LockedOverridesCaller(t *testing.T) {
+func TestResolve_ClampOverridesCaller(t *testing.T) {
 	cfg := mustConfig(t, baseYAML)
 	r := New(cfg)
 
 	res, _ := r.Resolve("flash", map[string]interface{}{"enable_thinking": false})
 	if res.Params["enable_thinking"] != true {
-		t.Errorf("locked enable_thinking should be true, got %v", res.Params["enable_thinking"])
+		t.Errorf("clamped enable_thinking should be true, got %v", res.Params["enable_thinking"])
 	}
 }
 

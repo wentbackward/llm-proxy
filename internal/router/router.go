@@ -1,5 +1,5 @@
 // Package router resolves virtual model names to concrete backends and
-// applies per-model parameter profiles (defaults → caller → locked).
+// applies per-model parameter profiles (defaults → caller → clamp).
 package router
 
 import (
@@ -67,7 +67,7 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 		return nil, fmt.Errorf("route %q references unknown backend %q", modelName, route.Backend)
 	}
 
-	params := mergeParams(route.Defaults, body, route.Locked)
+	params := mergeParams(route.Defaults, body, route.Clamp)
 
 	realModel := route.RealModel
 	if realModel == "" {
@@ -81,9 +81,9 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 	}, nil
 }
 
-// mergeParams applies the three-layer merge: defaults < caller < locked.
-func mergeParams(defaults map[string]interface{}, body map[string]interface{}, locked map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(defaults)+len(locked))
+// mergeParams applies the three-layer merge: defaults < caller < clamp.
+func mergeParams(defaults map[string]interface{}, body map[string]interface{}, clamp map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(defaults)+len(clamp))
 
 	for k, v := range defaults {
 		out[k] = v
@@ -93,8 +93,8 @@ func mergeParams(defaults map[string]interface{}, body map[string]interface{}, l
 			out[k] = v
 		}
 	}
-	// Locked always wins — caller cannot override.
-	for k, v := range locked {
+	// Clamp always wins — caller cannot override.
+	for k, v := range clamp {
 		out[k] = v
 	}
 	return out

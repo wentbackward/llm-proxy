@@ -53,7 +53,7 @@ type Route struct {
 	RealModel     string                 `yaml:"real_model"`
 	ContextLength int                    `yaml:"context_length"` // overrides upstream value in /v1/models; 0 = pass through
 	Defaults      map[string]interface{} `yaml:"defaults"`
-	Locked        map[string]interface{} `yaml:"locked"`
+	Clamp         map[string]interface{} `yaml:"clamp"`
 	AutoRoute     *AutoRoute             `yaml:"auto_route"`
 }
 
@@ -100,8 +100,8 @@ func Load(path string) (*Config, error) {
 		if r.Defaults == nil {
 			r.Defaults = make(map[string]interface{})
 		}
-		if r.Locked == nil {
-			r.Locked = make(map[string]interface{})
+		if r.Clamp == nil {
+			r.Clamp = make(map[string]interface{})
 		}
 		cfg.routeByModel[r.VirtualModel] = r
 	}

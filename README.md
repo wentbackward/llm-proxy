@@ -21,7 +21,7 @@ Written in Go — a single, self-contained binary with no runtime dependencies. 
 - **OpenTelemetry metrics** — TTFT, end-to-end duration, prompt/completion tokens, active requests; exported as Prometheus by default, OTLP-ready
 - **Zero-copy streaming** — SSE responses flow directly to the client; the proxy parses metrics from the byte stream without buffering
 - **Virtual model aliases** — map friendly names (`gresh-flash`, `claude-sonnet`) to real model IDs on any backend
-- **Parameter profiles** — set defaults and hard locks per model; caller params slot in between (`defaults < caller < locked`)
+- **Parameter profiles** — set defaults and clamp values per model; caller params slot in between (`defaults < caller < clamp`)
 - **Content-based auto-routing** — `gresh-auto` inspects message content and routes text to a fast model, images/video/documents to a vision model. With no route configured, requests pass through as-is — capability errors (e.g. sending multimodal content to a text-only model) are the backend's to return, not the proxy's to prevent
 - **`enable_thinking` abstraction** — a single flag translated to the right backend: `chat_template_kwargs` for vLLM/Qwen3, `thinking` block for Anthropic
 - **Config-driven** — all hosts, ports, model names and secrets in one YAML file; `${ENV_VAR}` templating keeps secrets out of config files
@@ -91,7 +91,7 @@ routes:                                   # optional — omit to run as pure pro
     defaults:
       temperature: 0.7
       enable_thinking: true
-    locked:
+    clamp:
       enable_thinking: true               # caller cannot disable this
 
   - virtual_model: my-auto
