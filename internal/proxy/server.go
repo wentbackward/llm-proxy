@@ -297,17 +297,18 @@ func (s *Server) modifyResponse(backendID, model, backendType string, streaming 
 //   - if the route has context_length set, context_length is overridden in the entry
 //   - entries with no matching route are dropped (they are internal implementation names)
 func (s *Server) rewriteModelsResponse(raw []byte) []byte {
-	// Build real_model → route lookup (skip auto-route entries)
+	// Build real_model → []route lookup (skip auto-route entries).
+	// Multiple virtual models may share the same real_model.
 	type routeInfo struct {
 		virtualModel  string
 		contextLength int
 	}
-	byReal := make(map[string]routeInfo, len(s.cfg.Routes))
+	byReal := make(map[string][]routeInfo, len(s.cfg.Routes))
 	for _, r := range s.cfg.Routes {
 		if r.AutoRoute != nil || r.RealModel == "" {
 			continue
 		}
-		byReal[r.RealModel] = routeInfo{r.VirtualModel, r.ContextLength}
+		byReal[r.RealModel] = append(byReal[r.RealModel], routeInfo{r.VirtualModel, r.ContextLength})
 	}
 
 	var upstream struct {
@@ -321,15 +322,27 @@ func (s *Server) rewriteModelsResponse(raw []byte) []byte {
 	out := make([]map[string]interface{}, 0, len(upstream.Data))
 	for _, entry := range upstream.Data {
 		id, _ := entry["id"].(string)
-		info, ok := byReal[id]
+		infos, ok := byReal[id]
 		if !ok {
 			continue // not a configured model, hide it
 		}
-		entry["id"] = info.virtualModel
-		if info.contextLength > 0 {
-			entry["context_length"] = info.contextLength
+		for i, info := range infos {
+			var e map[string]interface{}
+			if i == 0 {
+				e = entry
+			} else {
+				// clone the entry for additional virtual models
+				e = make(map[string]interface{}, len(entry))
+				for k, v := range entry {
+					e[k] = v
+				}
+			}
+			e["id"] = info.virtualModel
+			if info.contextLength > 0 {
+				e["context_length"] = info.contextLength
+			}
+			out = append(out, e)
 		}
-		out = append(out, entry)
 	}
 
 	result := map[string]interface{}{"object": upstream.Object, "data": out}
