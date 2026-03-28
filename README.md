@@ -13,6 +13,8 @@ A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI an
 |---|---|---|
 | TTFT, tokens, latency — out of the box, for any client and any backend, with zero code changes | Set defaults, enforce limits, or lock values per model. Take control of every call without touching your app | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
 
+Written in Go — a single, self-contained binary with no runtime dependencies. Handles high request volume with minimal overhead. Docker images available for Linux, macOS and Windows across amd64 and arm64.
+
 ## Features
 
 - **Protocol-aware passthrough** — understands OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) natively; forwards each in its own format with no translation required
