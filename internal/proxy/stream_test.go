@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourusername/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
 
 // nullMetrics returns a real Metrics wired to a no-op provider so tests don't

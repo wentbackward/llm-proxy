@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/yourusername/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/config"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────

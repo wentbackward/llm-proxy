@@ -5,7 +5,7 @@ package router
 import (
 	"fmt"
 
-	"github.com/yourusername/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/config"
 )
 
 // samplingKeys is the set of parameters that may be overridden by route profiles.

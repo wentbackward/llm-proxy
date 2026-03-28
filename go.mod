@@ -1,4 +1,4 @@
-module github.com/yourusername/llm-proxy
+module github.com/wentbackward/llm-proxy
 
 go 1.22
 

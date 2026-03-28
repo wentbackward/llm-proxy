@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourusername/llm-proxy/internal/config"
-	"github.com/yourusername/llm-proxy/internal/proxy"
-	"github.com/yourusername/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/proxy"
+	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
 
 func main() {

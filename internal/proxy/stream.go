@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/yourusername/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
 
 // ── SSE parser ────────────────────────────────────────────────────────────────

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/llm-proxy/internal/config"
-	"github.com/yourusername/llm-proxy/internal/router"
-	"github.com/yourusername/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/router"
+	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
 
 // Server handles all proxy traffic.
