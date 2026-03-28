@@ -128,40 +128,49 @@ func applyDefaults(cfg *Config) {
 }
 
 func validate(cfg *Config) error {
-	ids := make(map[string]bool, len(cfg.Backends))
-	for _, b := range cfg.Backends {
+	ids, err := validateBackends(cfg.Backends)
+	if err != nil {
+		return err
+	}
+	return validateRoutes(cfg.Routes, ids)
+}
+
+func validateBackends(backends []Backend) (map[string]bool, error) {
+	ids := make(map[string]bool, len(backends))
+	for _, b := range backends {
 		if b.ID == "" {
-			return fmt.Errorf("backend missing id")
+			return nil, fmt.Errorf("backend missing id")
 		}
 		if b.BaseURL == "" {
-			return fmt.Errorf("backend %q: base_url required", b.ID)
+			return nil, fmt.Errorf("backend %q: base_url required", b.ID)
 		}
 		if b.Type != "openai" && b.Type != "anthropic" {
-			return fmt.Errorf("backend %q: type must be openai or anthropic, got %q", b.ID, b.Type)
+			return nil, fmt.Errorf("backend %q: type must be openai or anthropic, got %q", b.ID, b.Type)
 		}
 		ids[b.ID] = true
 	}
+	return ids, nil
+}
 
-	models := make(map[string]bool, len(cfg.Routes))
-	for _, r := range cfg.Routes {
+func validateRoutes(routes []Route, backendIDs map[string]bool) error {
+	seen := make(map[string]bool, len(routes))
+	for _, r := range routes {
 		if r.VirtualModel == "" {
 			return fmt.Errorf("route missing virtual_model")
 		}
-		if models[r.VirtualModel] {
+		if seen[r.VirtualModel] {
 			return fmt.Errorf("duplicate virtual_model %q", r.VirtualModel)
 		}
-		models[r.VirtualModel] = true
+		seen[r.VirtualModel] = true
 
 		if r.AutoRoute == nil && r.Backend == "" {
 			return fmt.Errorf("route %q: must have backend or auto_route", r.VirtualModel)
 		}
-		if r.Backend != "" && !ids[r.Backend] {
+		if r.Backend != "" && !backendIDs[r.Backend] {
 			return fmt.Errorf("route %q: unknown backend %q", r.VirtualModel, r.Backend)
 		}
-		if r.AutoRoute != nil {
-			if r.AutoRoute.Text == "" || r.AutoRoute.Vision == "" {
-				return fmt.Errorf("route %q: auto_route requires text and vision", r.VirtualModel)
-			}
+		if r.AutoRoute != nil && (r.AutoRoute.Text == "" || r.AutoRoute.Vision == "") {
+			return fmt.Errorf("route %q: auto_route requires text and vision", r.VirtualModel)
 		}
 	}
 	return nil

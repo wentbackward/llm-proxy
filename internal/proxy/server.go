@@ -263,7 +263,7 @@ func translateParams(body map[string]interface{}, backend *config.Backend, isStr
 			body["chat_template_kwargs"] = kwargs
 
 		case "anthropic":
-			if enableThinking == true {
+			if et, _ := enableThinking.(bool); et
 				budget := int(thinkingBudget)
 				if budget == 0 {
 					if mt, _ := body["max_tokens"].(float64); mt > 0 {
