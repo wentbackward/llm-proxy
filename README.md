@@ -7,9 +7,11 @@
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI and Anthropic natively. Drop it between your app and any LLM provider to get structured observability — TTFT, token counts, request duration — with zero changes to your application code.
+A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI and Anthropic natively.
 
-Route all your clients through a single proxy and swap the underlying model for everyone with one config change — no redeployments, no client updates, no coordination.
+| 📡 OpenTelemetry | 🎛 Inject Params | ⚙️ Simple Admin |
+|---|---|---|
+| TTFT, tokens, latency — out of the box, for any client and any backend, with zero code changes | Set defaults, enforce limits, or lock values per model. Take control of every call without touching your app | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
 
 ## Features
 
