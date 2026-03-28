@@ -15,7 +15,7 @@ A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI an
 
 | 🏷️ Virtual Models | ⚙️ Simple Admin |
 |---|---|
-| Give any model a friendly name and a personality. `gresh-fast` and `gresh-coder` can point to the same underlying model with different temperature, thinking budget, and token limits — clients just switch models in the UI to change behaviour, no code changes needed | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
+| Uniquely name the same underlying model with different temperature, thinking budget, and token limits — clients just switch models to change behaviour, on the fly | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
 
 Written in Go — a single, self-contained binary with no runtime dependencies. Handles high request volume with minimal overhead. Docker images available for Linux, macOS and Windows across amd64 and arm64.
 
