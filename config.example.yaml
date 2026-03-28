@@ -1,0 +1,84 @@
+server:
+  host: "0.0.0.0"
+  port: 4000
+
+telemetry:
+  prometheus:
+    enabled: true
+    port: 9091
+    path: /metrics
+
+# Upstream LLM providers
+backends:
+  - id: vllm-27b
+    type: openai          # openai | anthropic
+    base_url: "http://localhost:3022/v1"
+    api_key: "${VLLM_API_KEY}"  # omit or leave blank if no auth
+    timeout_seconds: 300
+
+  - id: vllm-9b
+    type: openai
+    base_url: "http://localhost:3009/v1"
+    timeout_seconds: 120
+
+  - id: anthropic
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    api_key: "${ANTHROPIC_API_KEY}"
+    timeout_seconds: 300
+
+  - id: openai
+    type: openai
+    base_url: "https://api.openai.com/v1"
+    api_key: "${OPENAI_API_KEY}"
+    timeout_seconds: 300
+
+# Virtual model aliases with optional param profiles
+# Omit routes entirely to run as a pure transparent proxy
+routes:
+  - virtual_model: gresh-flash
+    backend: vllm-9b
+    real_model: "Qwen/Qwen2.5-VL-7B-Instruct"
+    defaults:
+      temperature: 0.7
+      top_p: 0.95
+      max_tokens: 4096
+      enable_thinking: true
+    locked:
+      enable_thinking: true   # caller cannot disable thinking
+
+  - virtual_model: gresh-agent
+    backend: vllm-27b
+    real_model: "Qwen/Qwen2.5-VL-32B-Instruct"
+    defaults:
+      temperature: 0.7
+      top_p: 0.95
+      max_tokens: 16384
+      enable_thinking: true
+    locked:
+      enable_thinking: true
+
+  - virtual_model: gresh-vision
+    backend: vllm-27b
+    real_model: "Qwen/Qwen2.5-VL-32B-Instruct"
+    defaults:
+      temperature: 0.3
+      top_p: 0.9
+      max_tokens: 8192
+      enable_thinking: true
+    locked:
+      enable_thinking: true
+
+  - virtual_model: gresh-auto
+    # No backend — auto-routes based on message content
+    auto_route:
+      text: gresh-flash
+      vision: gresh-vision
+
+  - virtual_model: claude-sonnet
+    backend: anthropic
+    real_model: "claude-sonnet-4-6"
+    defaults:
+      max_tokens: 8192
+      enable_thinking: true
+      thinking_budget: 8000

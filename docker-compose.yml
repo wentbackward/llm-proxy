@@ -1,0 +1,19 @@
+services:
+  llm-proxy:
+    build: .
+    container_name: llm-proxy
+    restart: unless-stopped
+    ports:
+      - "4000:4000"   # proxy
+      - "9091:9091"   # prometheus metrics
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+    environment:
+      CONFIG_PATH: /config.yaml
+      # Secrets — set these in a .env file or your secrets manager
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
+    dns:
+      - 100.100.100.100   # Tailscale MagicDNS
+      - 8.8.8.8
