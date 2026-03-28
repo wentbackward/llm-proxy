@@ -3,7 +3,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o llm-proxy ./cmd/llm-proxy
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o llm-proxy ./cmd/llm-proxy
 
 FROM scratch
 COPY --from=builder /app/llm-proxy /llm-proxy
