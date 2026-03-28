@@ -22,7 +22,7 @@ Written in Go — a single, self-contained binary with no runtime dependencies. 
 - **Zero-copy streaming** — SSE responses flow directly to the client; the proxy parses metrics from the byte stream without buffering
 - **Virtual model aliases** — map friendly names (`gresh-flash`, `claude-sonnet`) to real model IDs on any backend
 - **Parameter profiles** — set defaults and hard locks per model; caller params slot in between (`defaults < caller < locked`)
-- **Content-based auto-routing** — `gresh-auto` inspects message content and routes text to a fast model, images/video/documents to a vision model
+- **Content-based auto-routing** — `gresh-auto` inspects message content and routes text to a fast model, images/video/documents to a vision model. With no route configured, requests pass through as-is — capability errors (e.g. sending multimodal content to a text-only model) are the backend's to return, not the proxy's to prevent
 - **`enable_thinking` abstraction** — a single flag translated to the right backend: `chat_template_kwargs` for vLLM/Qwen3, `thinking` block for Anthropic
 - **Config-driven** — all hosts, ports, model names and secrets in one YAML file; `${ENV_VAR}` templating keeps secrets out of config files
 - **Single static binary** — no runtime, no dependencies; ~7 MB Docker image built on `scratch`
