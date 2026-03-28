@@ -16,13 +16,13 @@ telemetry:
 backends:
   - id: vllm-27b
     type: openai          # openai | anthropic
-    base_url: "http://localhost:3022/v1"
+    base_url: "http://localhost:3022"
     api_key: "${VLLM_API_KEY}"  # omit or leave blank if no auth
     timeout_seconds: 300
 
   - id: vllm-9b
     type: openai
-    base_url: "http://localhost:3009/v1"
+    base_url: "http://localhost:3009"
     timeout_seconds: 120
 
   - id: anthropic
@@ -33,7 +33,7 @@ backends:
 
   - id: openai
     type: openai
-    base_url: "https://api.openai.com/v1"
+    base_url: "https://api.openai.com"
     api_key: "${OPENAI_API_KEY}"
     timeout_seconds: 300
 

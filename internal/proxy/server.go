@@ -190,8 +190,10 @@ func director(target *url.URL, backend *config.Backend, body []byte, protocol st
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
-		req.URL.Path = joinPath(target.Path, req.URL.Path)
 		req.Host = target.Host
+		// req.URL.Path is kept as-is — the proxy receives /v1/chat/completions
+		// and forwards it unchanged. base_url should be scheme+host only
+		// (e.g. http://localhost:3022), not include a /v1 suffix.
 
 		// Auth headers
 		if backend.APIKey != "" {
@@ -345,12 +347,3 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	})
 }
 
-func joinPath(base, suffix string) string {
-	if strings.HasSuffix(base, "/") && strings.HasPrefix(suffix, "/") {
-		return base + suffix[1:]
-	}
-	if !strings.HasSuffix(base, "/") && !strings.HasPrefix(suffix, "/") {
-		return base + "/" + suffix
-	}
-	return base + suffix
-}
