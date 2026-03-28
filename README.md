@@ -9,9 +9,13 @@
 
 A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI and Anthropic natively.
 
-| 📡 OpenTelemetry | 🎛 Inject Params | ⚙️ Simple Admin |
-|---|---|---|
-| TTFT, tokens, latency — out of the box, for any client and any backend, with zero code changes | Set defaults, enforce limits, or lock values per model. Take control of every call without touching your app | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
+| 📡 OpenTelemetry | 🎛 Inject Params |
+|---|---|
+| TTFT, tokens, latency — out of the box, for any client and any backend, with zero code changes | Set defaults, enforce limits, or clamp values per model. Take control of every call without touching your app |
+
+| 🏷️ Virtual Models | ⚙️ Simple Admin |
+|---|---|
+| Give any model a friendly name and a personality. `gresh-fast` and `gresh-coder` can point to the same underlying model with different temperature, thinking budget, and token limits — clients just switch models in the UI to change behaviour, no code changes needed | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
 
 Written in Go — a single, self-contained binary with no runtime dependencies. Handles high request volume with minimal overhead. Docker images available for Linux, macOS and Windows across amd64 and arm64.
 
@@ -101,6 +105,41 @@ routes:                                   # optional — omit to run as pure pro
 ```
 
 All fields under `server`, `backends`, and `routes` — including ports, model IDs, and URLs — live in this file. Secrets use `${ENV_VAR}` syntax and are never read from the config file directly.
+
+## Virtual models
+
+A virtual model is a named personality layered over a real model. Multiple virtual models can point to the same underlying model with different parameter profiles — clients simply switch models in their UI to change behaviour.
+
+```yaml
+routes:
+  # Relaxed, creative — high temperature, long replies
+  - virtual_model: my-fast
+    backend: my-vllm
+    real_model: "Qwen/Qwen3.5-9B"
+    defaults:
+      temperature: 0.8
+      max_tokens: 8192
+
+  # Precise, focused — lower temperature, thinking forced on
+  - virtual_model: my-coder
+    backend: my-vllm
+    real_model: "Qwen/Qwen3.5-9B"        # same model, different behaviour
+    defaults:
+      temperature: 0.2
+      max_tokens: 4096
+    clamp:
+      enable_thinking: true               # caller cannot disable this
+      presence_penalty: 0.0
+```
+
+Both models appear in `/v1/models` and are selectable from any client. Switching from `my-fast` to `my-coder` in the UI is all that's needed to test a different parameter set — no API changes, no redeployment, no secret sharing with clients.
+
+Use `context_length` to override what clients see in the model card, preventing them from requesting more context than your GPU can actually serve:
+
+```yaml
+  - virtual_model: my-fast
+    context_length: 131072               # reported to clients; 0 = pass through from upstream
+```
 
 ## Metrics reference
 
