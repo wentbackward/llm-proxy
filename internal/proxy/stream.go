@@ -22,8 +22,15 @@ type sseParser struct {
 	metrics     *telemetry.Metrics
 	ctx         context.Context
 
-	ttftDone bool
-	lineBuf  []byte // holds a partial line between Read calls
+	ttftDone    bool
+	t0FirstTok  time.Time // when first content token arrived (for gen speed)
+	lineBuf     []byte    // holds a partial line between Read calls
+
+	// Token accumulation
+	promptToks     int64
+	completionToks int64
+	thinkChars     int64 // length of thinking/reasoning content seen
+	contentChars   int64 // length of regular text content seen
 
 	// Anthropic accumulates token counts across events
 	anthropicInputTokens  int64
@@ -87,23 +94,29 @@ func (p *sseParser) feed(data []byte) {
 }
 
 func (p *sseParser) handleOpenAIEvent(evt map[string]interface{}) {
-	// TTFT: first chunk with non-empty delta content
+	// TTFT: first chunk with non-empty delta content or reasoning content
 	if !p.ttftDone {
-		if content := firstDeltaContent(evt); content != "" {
+		if content, think := firstDeltaContent(evt); content != "" || think != "" {
 			elapsed := time.Since(p.t0).Seconds()
 			p.metrics.TTFT.Record(p.ctx, elapsed, telemetry.BackendAttrs(p.backendID, p.model))
 			p.ttftDone = true
+			p.t0FirstTok = time.Now()
 		}
+	}
+
+	// Accumulate content/thinking character counts for think ratio
+	if content, think := firstDeltaContent(evt); content != "" || think != "" {
+		p.contentChars += int64(len(content))
+		p.thinkChars += int64(len(think))
 	}
 
 	// Usage arrives in the final chunk when stream_options.include_usage=true
 	if usage, ok := evt["usage"].(map[string]interface{}); ok {
-		attrs := telemetry.BackendAttrs(p.backendID, p.model)
 		if v, _ := usage["prompt_tokens"].(float64); v > 0 {
-			p.metrics.PromptTokens.Add(p.ctx, int64(v), attrs)
+			p.promptToks = int64(v)
 		}
 		if v, _ := usage["completion_tokens"].(float64); v > 0 {
-			p.metrics.CompletionTokens.Add(p.ctx, int64(v), attrs)
+			p.completionToks = int64(v)
 		}
 	}
 }
@@ -122,14 +135,21 @@ func (p *sseParser) handleAnthropicEvent(evt map[string]interface{}) {
 
 	case "content_block_delta":
 		// TTFT on first thinking or text delta
-		if !p.ttftDone {
-			if delta, ok := evt["delta"].(map[string]interface{}); ok {
-				dtype, _ := delta["type"].(string)
-				if dtype == "text_delta" || dtype == "thinking_delta" {
-					elapsed := time.Since(p.t0).Seconds()
-					p.metrics.TTFT.Record(p.ctx, elapsed, telemetry.BackendAttrs(p.backendID, p.model))
-					p.ttftDone = true
-				}
+		if delta, ok := evt["delta"].(map[string]interface{}); ok {
+			dtype, _ := delta["type"].(string)
+			if !p.ttftDone && (dtype == "text_delta" || dtype == "thinking_delta") {
+				elapsed := time.Since(p.t0).Seconds()
+				p.metrics.TTFT.Record(p.ctx, elapsed, telemetry.BackendAttrs(p.backendID, p.model))
+				p.ttftDone = true
+				p.t0FirstTok = time.Now()
+			}
+			// Accumulate content/think chars for think ratio
+			text, _ := delta["text"].(string)
+			think, _ := delta["thinking"].(string)
+			if dtype == "thinking_delta" {
+				p.thinkChars += int64(len(think))
+			} else if dtype == "text_delta" {
+				p.contentChars += int64(len(text))
 			}
 		}
 
@@ -149,25 +169,69 @@ func (p *sseParser) handleAnthropicEvent(evt map[string]interface{}) {
 func (p *sseParser) recordAnthropicTokens() {
 	attrs := telemetry.BackendAttrs(p.backendID, p.model)
 	if p.anthropicInputTokens > 0 {
+		p.promptToks = p.anthropicInputTokens
 		p.metrics.PromptTokens.Add(p.ctx, p.anthropicInputTokens, attrs)
 		p.anthropicInputTokens = 0
 	}
 	if p.anthropicOutputTokens > 0 {
+		p.completionToks = p.anthropicOutputTokens
 		p.metrics.CompletionTokens.Add(p.ctx, p.anthropicOutputTokens, attrs)
 		p.anthropicOutputTokens = 0
 	}
 }
 
-func firstDeltaContent(evt map[string]interface{}) string {
+// recordFinal records per-request summary metrics once the stream is complete.
+// Called from the interceptedBody onClose callback.
+func (p *sseParser) recordFinal() {
+	attrs := telemetry.BackendAttrs(p.backendID, p.model)
+
+	// Flush any buffered token counts to totals counters (OpenAI path)
+	if p.backendType != "anthropic" {
+		if p.promptToks > 0 {
+			p.metrics.PromptTokens.Add(p.ctx, p.promptToks, attrs)
+		}
+		if p.completionToks > 0 {
+			p.metrics.CompletionTokens.Add(p.ctx, p.completionToks, attrs)
+		}
+	}
+
+	// Generation speed (tokens/sec since first token)
+	if p.ttftDone && p.completionToks > 0 {
+		decodeSecs := time.Since(p.t0FirstTok).Seconds()
+		if decodeSecs > 0 {
+			tps := float64(p.completionToks) / decodeSecs
+			p.metrics.GenerationTokensPerSec.Record(p.ctx, tps, attrs)
+		}
+	}
+
+	// Think/content ratio
+	total := p.thinkChars + p.contentChars
+	if total > 0 {
+		ratio := float64(p.thinkChars) / float64(total)
+		p.metrics.ThinkContentRatio.Record(p.ctx, ratio, attrs)
+	}
+
+	// Prompt tokens per request
+	if p.promptToks > 0 {
+		p.metrics.PromptTokensPerRequest.Record(p.ctx, p.promptToks, attrs)
+	}
+}
+
+// firstDeltaContent returns the text content and reasoning/thinking content
+// from the first choice delta in an OpenAI-style SSE event.
+func firstDeltaContent(evt map[string]interface{}) (content, reasoning string) {
 	choices, _ := evt["choices"].([]interface{})
 	for _, c := range choices {
 		ch, _ := c.(map[string]interface{})
 		delta, _ := ch["delta"].(map[string]interface{})
-		if s, _ := delta["content"].(string); s != "" {
-			return s
+		content, _ = delta["content"].(string)
+		// vLLM exposes thinking content as reasoning_content
+		reasoning, _ = delta["reasoning_content"].(string)
+		if content != "" || reasoning != "" {
+			return
 		}
 	}
-	return ""
+	return
 }
 
 // ── interceptedBody ───────────────────────────────────────────────────────────

@@ -260,6 +260,7 @@ func (s *Server) modifyResponse(backendID, model, backendType string, streaming 
 				ReadCloser: resp.Body,
 				parser:     parser,
 				onClose: func() {
+					parser.recordFinal()
 					elapsed := time.Since(t0).Seconds()
 					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, model))
 					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, model, statusStr))
@@ -414,6 +415,7 @@ func extractNonStreamingUsage(data []byte, backendID, model, backendType string,
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
 		if v, _ := usage[promptKey].(float64); v > 0 {
 			m.PromptTokens.Add(ctx, int64(v), attrs)
+			m.PromptTokensPerRequest.Record(ctx, int64(v), attrs)
 		}
 		if v, _ := usage[completionKey].(float64); v > 0 {
 			m.CompletionTokens.Add(ctx, int64(v), attrs)

@@ -13,12 +13,15 @@ import (
 
 // Metrics holds all instrumentation handles for the proxy.
 type Metrics struct {
-	RequestDuration  metric.Float64Histogram
-	TTFT             metric.Float64Histogram
-	PromptTokens     metric.Int64Counter
-	CompletionTokens metric.Int64Counter
-	ActiveRequests   metric.Int64UpDownCounter
-	RequestsTotal    metric.Int64Counter
+	RequestDuration        metric.Float64Histogram
+	TTFT                   metric.Float64Histogram
+	PromptTokens           metric.Int64Counter
+	CompletionTokens       metric.Int64Counter
+	ActiveRequests         metric.Int64UpDownCounter
+	RequestsTotal          metric.Int64Counter
+	GenerationTokensPerSec metric.Float64Gauge
+	ThinkContentRatio      metric.Float64Histogram
+	PromptTokensPerRequest metric.Int64Histogram
 }
 
 // Init creates the OTel meter provider backed by Prometheus and returns the
@@ -76,13 +79,39 @@ func Init() (*Metrics, http.Handler, error) {
 		return nil, nil, err
 	}
 
+	genTPS, err := meter.Float64Gauge("llm_generation_tokens_per_second",
+		metric.WithDescription("Output token generation speed for the last completed request"),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	thinkRatio, err := meter.Float64Histogram("llm_think_content_ratio",
+		metric.WithDescription("Fraction of response that is think/reasoning vs content tokens"),
+		metric.WithExplicitBucketBoundaries(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	promptPerReq, err := meter.Int64Histogram("llm_prompt_tokens_per_request",
+		metric.WithDescription("Prompt token count per request"),
+		metric.WithExplicitBucketBoundaries(128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return &Metrics{
-		RequestDuration:  reqDur,
-		TTFT:             ttft,
-		PromptTokens:     promptTok,
-		CompletionTokens: completionTok,
-		ActiveRequests:   active,
-		RequestsTotal:    total,
+		RequestDuration:        reqDur,
+		TTFT:                   ttft,
+		PromptTokens:           promptTok,
+		CompletionTokens:       completionTok,
+		ActiveRequests:         active,
+		RequestsTotal:          total,
+		GenerationTokensPerSec: genTPS,
+		ThinkContentRatio:      thinkRatio,
+		PromptTokensPerRequest: promptPerReq,
 	}, promhttp.Handler(), nil
 }
 
