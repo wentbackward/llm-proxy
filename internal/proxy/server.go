@@ -88,9 +88,13 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			resp, err := http.DefaultClient.Do(req)
 			if err == nil && resp.StatusCode == http.StatusOK {
 				defer resp.Body.Close()
-				w.Header().Set("Content-Type", "application/json")
-				io.Copy(w, resp.Body)
-				return
+				data, readErr := io.ReadAll(resp.Body)
+				if readErr == nil {
+					rewritten := s.rewriteModelsResponse(data)
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(rewritten)
+					return
+				}
 			}
 			if resp != nil {
 				resp.Body.Close()
@@ -108,6 +112,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	var data []modelEntry
 	for _, route := range s.cfg.Routes {
+		if route.AutoRoute != nil {
+			continue // skip auto-route entries; they resolve to real routes
+		}
 		data = append(data, modelEntry{
 			ID:      route.VirtualModel,
 			Object:  "model",
@@ -283,6 +290,54 @@ func (s *Server) modifyResponse(backendID, model, backendType string, streaming 
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// rewriteModelsResponse takes the raw upstream /v1/models JSON and rewrites it:
+//   - model entries whose id matches a route's real_model are renamed to the virtual_model name
+//   - if the route has context_length set, context_length is overridden in the entry
+//   - entries with no matching route are dropped (they are internal implementation names)
+func (s *Server) rewriteModelsResponse(raw []byte) []byte {
+	// Build real_model → route lookup (skip auto-route entries)
+	type routeInfo struct {
+		virtualModel  string
+		contextLength int
+	}
+	byReal := make(map[string]routeInfo, len(s.cfg.Routes))
+	for _, r := range s.cfg.Routes {
+		if r.AutoRoute != nil || r.RealModel == "" {
+			continue
+		}
+		byReal[r.RealModel] = routeInfo{r.VirtualModel, r.ContextLength}
+	}
+
+	var upstream struct {
+		Object string                   `json:"object"`
+		Data   []map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &upstream); err != nil {
+		return raw // pass through unparseable response unchanged
+	}
+
+	out := make([]map[string]interface{}, 0, len(upstream.Data))
+	for _, entry := range upstream.Data {
+		id, _ := entry["id"].(string)
+		info, ok := byReal[id]
+		if !ok {
+			continue // not a configured model, hide it
+		}
+		entry["id"] = info.virtualModel
+		if info.contextLength > 0 {
+			entry["context_length"] = info.contextLength
+		}
+		out = append(out, entry)
+	}
+
+	result := map[string]interface{}{"object": upstream.Object, "data": out}
+	b, err := json.Marshal(result)
+	if err != nil {
+		return raw
+	}
+	return b
+}
 
 // translateParams handles backend-specific parameter translation in-place.
 func translateParams(body map[string]interface{}, backend *config.Backend, isStreaming bool) {

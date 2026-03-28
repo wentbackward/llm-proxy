@@ -43,6 +43,7 @@ routes:
   - virtual_model: gresh-flash
     backend: vllm-9b
     real_model: "Qwen/Qwen2.5-VL-7B-Instruct"
+    context_length: 131072   # override inflated model-card value; 0 = pass through
     defaults:
       temperature: 0.7
       top_p: 0.95
@@ -54,6 +55,7 @@ routes:
   - virtual_model: gresh-agent
     backend: vllm-27b
     real_model: "Qwen/Qwen2.5-VL-32B-Instruct"
+    context_length: 131072
     defaults:
       temperature: 0.7
       top_p: 0.95
@@ -65,6 +67,7 @@ routes:
   - virtual_model: gresh-vision
     backend: vllm-27b
     real_model: "Qwen/Qwen2.5-VL-32B-Instruct"
+    context_length: 131072
     defaults:
       temperature: 0.3
       top_p: 0.9

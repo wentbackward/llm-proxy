@@ -48,12 +48,13 @@ type AutoRoute struct {
 }
 
 type Route struct {
-	VirtualModel string                 `yaml:"virtual_model"`
-	Backend      string                 `yaml:"backend"`
-	RealModel    string                 `yaml:"real_model"`
-	Defaults     map[string]interface{} `yaml:"defaults"`
-	Locked       map[string]interface{} `yaml:"locked"`
-	AutoRoute    *AutoRoute             `yaml:"auto_route"`
+	VirtualModel  string                 `yaml:"virtual_model"`
+	Backend       string                 `yaml:"backend"`
+	RealModel     string                 `yaml:"real_model"`
+	ContextLength int                    `yaml:"context_length"` // overrides upstream value in /v1/models; 0 = pass through
+	Defaults      map[string]interface{} `yaml:"defaults"`
+	Locked        map[string]interface{} `yaml:"locked"`
+	AutoRoute     *AutoRoute             `yaml:"auto_route"`
 }
 
 type Config struct {
