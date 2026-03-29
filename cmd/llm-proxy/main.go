@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -140,8 +141,13 @@ func probeBackends(cfg *config.Config) {
 			continue
 		}
 
-		url := b.BaseURL + "/v1/models"
-		req, err := http.NewRequest(http.MethodGet, url, nil)
+		// Use only scheme+host for the probe — base_url may include a model-specific
+		// path (e.g. HuggingFace router) and /v1/models is always at the root.
+		probeURL := b.BaseURL + "/v1/models"
+		if parsed, parseErr := url.Parse(b.BaseURL); parseErr == nil && parsed.Path != "" && parsed.Path != "/" {
+			probeURL = parsed.Scheme + "://" + parsed.Host + "/v1/models"
+		}
+		req, err := http.NewRequest(http.MethodGet, probeURL, nil)
 		if err != nil {
 			log.Printf("[probe] backend %-12s ERROR building request: %v", b.ID, err)
 			continue
