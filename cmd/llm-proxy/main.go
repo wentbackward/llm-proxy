@@ -96,8 +96,9 @@ func main() {
 
 	go func() {
 		for range hup {
-			log.Println("[llm-proxy] SIGHUP received — reloading log level")
+			log.Println("[llm-proxy] SIGHUP received — reloading log level and re-probing backends")
 			logger.Reload()
+			probeBackends(cfg)
 		}
 	}()
 

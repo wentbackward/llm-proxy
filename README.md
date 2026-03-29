@@ -141,6 +141,42 @@ Use `context_length` to override what clients see in the model card, preventing 
     context_length: 131072               # reported to clients; 0 = pass through from upstream
 ```
 
+## Logging and diagnostics
+
+At startup the proxy probes every configured backend, logs whether it is reachable, lists the models it reports, and maps each one to its virtual model names:
+
+```
+[probe] backend vllm         OK  upstream models: [Qwen/Qwen3.5-9B]
+[probe]   → my-fast                          (real: Qwen/Qwen3.5-9B)
+[probe]   → my-coder                         (real: Qwen/Qwen3.5-9B)
+[probe] backend anthropic    OK  upstream models: []
+[probe]   → claude-sonnet                    (real: claude-sonnet-4-6-20251001)
+[probe] backend hf-serverless UNREACHABLE: dial tcp ...: connection refused
+```
+
+Probe output is always printed regardless of log level. Send `SIGHUP` to re-probe without restarting:
+
+```bash
+docker kill --signal=HUP llm-proxy
+```
+
+### Log levels
+
+Set `LOG_LEVEL` in the environment (default `0`). `SIGHUP` also reloads this value at runtime.
+
+| Level | What is logged |
+|---|---|
+| `0` | Errors only (default) |
+| `1` | One line per request — method, path, virtual model → real model, backend, status, duration |
+| `2` | Level 1 + all incoming request headers |
+| `3` | Level 2 + first 80 characters of the request body |
+
+```yaml
+# docker-compose.yml
+environment:
+  LOG_LEVEL: "1"
+```
+
 ## Metrics reference
 
 | Metric | Type | Labels |
@@ -151,6 +187,9 @@ Use `context_length` to override what clients see in the model card, preventing 
 | `llm_completion_tokens_total` | Counter | `backend`, `model` |
 | `llm_active_requests` | Gauge | `backend`, `model` |
 | `llm_requests_total` | Counter | `backend`, `model`, `status` |
+| `llm_generation_tokens_per_second` | Gauge | `backend`, `model` |
+| `llm_think_content_ratio` | Histogram | `backend`, `model` |
+| `llm_prompt_tokens_per_request` | Histogram | `backend`, `model` |
 
 ## Development
 
