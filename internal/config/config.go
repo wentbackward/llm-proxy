@@ -40,6 +40,7 @@ type Backend struct {
 	BaseURL        string `yaml:"base_url"`
 	APIKey         string `yaml:"api_key"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	SkipProbe      bool   `yaml:"skip_probe"` // skip /v1/models health check at startup/SIGHUP
 }
 
 type AutoRoute struct {

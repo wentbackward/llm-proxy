@@ -154,6 +154,17 @@ At startup the proxy probes every configured backend, logs whether it is reachab
 [probe] backend hf-serverless UNREACHABLE: dial tcp ...: connection refused
 ```
 
+Cloud APIs (Anthropic, OpenAI, HuggingFace) don't expose `/v1/models` — set `skip_probe: true` on those backends to suppress the 404 noise:
+
+```yaml
+backends:
+  - id: hf-serverless
+    type: openai
+    base_url: "https://router.huggingface.co/..."
+    api_key: "${HF_API_KEY}"
+    skip_probe: true
+```
+
 Probe output is always printed regardless of log level. Send `SIGHUP` to re-probe without restarting:
 
 ```bash

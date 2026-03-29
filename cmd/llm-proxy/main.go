@@ -134,6 +134,12 @@ func probeBackends(cfg *config.Config) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	for _, b := range cfg.Backends {
+		if b.SkipProbe {
+			log.Printf("[probe] backend %-12s SKIPPED (skip_probe: true)", b.ID)
+			logVirtualModels(byBackend[b.ID])
+			continue
+		}
+
 		url := b.BaseURL + "/v1/models"
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
@@ -151,6 +157,12 @@ func probeBackends(cfg *config.Config) {
 			continue
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			log.Printf("[probe] backend %-12s OK  (no /v1/models endpoint)", b.ID)
+			logVirtualModels(byBackend[b.ID])
+			continue
+		}
 
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("[probe] backend %-12s HTTP %d", b.ID, resp.StatusCode)
