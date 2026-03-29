@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-One config file, one endpoint, every LLM. Connect any client that speaks OpenAI or Anthropic to any combination of local and cloud backends.
+Virtualize models from any provider — local or cloud — and switch between them in your client UI.
 
 ```
 client → llm-proxy:4000/v1 → vLLM (local)
