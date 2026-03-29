@@ -1,7 +1,14 @@
 // Package journal emits structured request analysis as OTel log records.
 package journal
 
-import "strings"
+import (
+	"strings"
+)
+
+const (
+	maxSystemText   = 2048  // 2KB cap for system prompt
+	maxLastUserText = 8192  // 8KB cap for last user message
+)
 
 // Entry holds the analysis of a single proxy request.
 type Entry struct {
@@ -26,6 +33,10 @@ type Entry struct {
 	JSONBlocks    int // code-fenced json blocks > 50 chars
 	IsMultimodal  bool
 
+	// Message content for routing analysis
+	SystemText   string // system prompt, capped at 2KB
+	LastUserText string // last user message, capped at 8KB
+
 	// Merged params applied to request
 	Params map[string]interface{}
 }
@@ -44,6 +55,7 @@ func Analyze(body map[string]interface{}, protocol string) Entry {
 	if sys, ok := body["system"].(string); ok {
 		e.SystemChars = len(sys)
 		e.TotalChars += len(sys)
+		e.SystemText = truncate(sys, maxSystemText)
 		e.CodeFences += countCodeFences(sys)
 		e.JSONBlocks += countJSONBlocks(sys)
 	}
@@ -68,8 +80,10 @@ func Analyze(body map[string]interface{}, protocol string) Entry {
 		switch role {
 		case "system":
 			e.SystemChars += chars
+			e.SystemText = truncate(text, maxSystemText)
 		case "user":
 			e.LastUserChars = chars
+			e.LastUserText = truncate(text, maxLastUserText)
 		}
 
 		e.CodeFences += countCodeFences(text)
@@ -110,6 +124,14 @@ func extractMessageText(msg map[string]interface{}) (text string, multimodal boo
 func countCodeFences(text string) int {
 	count := strings.Count(text, "```")
 	return count / 2
+}
+
+// truncate returns s capped at max bytes. If truncated, appends "[truncated]".
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "[truncated]"
 }
 
 // countJSONBlocks counts code-fenced json blocks with > 50 chars of content.

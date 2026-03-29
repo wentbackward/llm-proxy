@@ -43,6 +43,12 @@ func TestAnalyze_SimpleTextMessages(t *testing.T) {
 	if e.IsMultimodal {
 		t.Error("should not be multimodal")
 	}
+	if e.SystemText != "You are helpful." {
+		t.Errorf("system text: got %q, want %q", e.SystemText, "You are helpful.")
+	}
+	if e.LastUserText != "Hello world" {
+		t.Errorf("last user text: got %q, want %q", e.LastUserText, "Hello world")
+	}
 }
 
 func TestAnalyze_AnthropicTopLevelSystem(t *testing.T) {
@@ -59,6 +65,12 @@ func TestAnalyze_AnthropicTopLevelSystem(t *testing.T) {
 	}
 	if e.TotalChars != len("Be concise.")+len("Hi") {
 		t.Errorf("total chars: got %d", e.TotalChars)
+	}
+	if e.SystemText != "Be concise." {
+		t.Errorf("system text: got %q, want %q", e.SystemText, "Be concise.")
+	}
+	if e.LastUserText != "Hi" {
+		t.Errorf("last user text: got %q, want %q", e.LastUserText, "Hi")
 	}
 }
 
@@ -152,6 +164,9 @@ func TestAnalyze_MultipleUserMessages(t *testing.T) {
 	if e.LastUserChars != len("second message") {
 		t.Errorf("last user chars: got %d, want %d", e.LastUserChars, len("second message"))
 	}
+	if e.LastUserText != "second message" {
+		t.Errorf("last user text: got %q, want %q", e.LastUserText, "second message")
+	}
 }
 
 func TestAnalyze_EmptyBody(t *testing.T) {
@@ -163,6 +178,31 @@ func TestAnalyze_EmptyBody(t *testing.T) {
 	}
 	if e.TotalChars != 0 {
 		t.Errorf("total chars: got %d, want 0", e.TotalChars)
+	}
+}
+
+func TestAnalyze_TextTruncation(t *testing.T) {
+	longSystem := strings.Repeat("s", maxSystemText+100)
+	longUser := strings.Repeat("u", maxLastUserText+100)
+	body := map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "system", "content": longSystem},
+			map[string]interface{}{"role": "user", "content": longUser},
+		},
+	}
+	e := Analyze(body, "openai")
+
+	if len(e.SystemText) != maxSystemText+len("[truncated]") {
+		t.Errorf("system text length: got %d, want %d", len(e.SystemText), maxSystemText+len("[truncated]"))
+	}
+	if !strings.HasSuffix(e.SystemText, "[truncated]") {
+		t.Error("system text should end with [truncated]")
+	}
+	if len(e.LastUserText) != maxLastUserText+len("[truncated]") {
+		t.Errorf("last user text length: got %d, want %d", len(e.LastUserText), maxLastUserText+len("[truncated]"))
+	}
+	if !strings.HasSuffix(e.LastUserText, "[truncated]") {
+		t.Error("last user text should end with [truncated]")
 	}
 }
 

@@ -72,6 +72,9 @@ func (j *Journal) Log(ctx context.Context, e Entry) {
 		otellog.Int("code_fences", e.CodeFences),
 		otellog.Int("json_blocks", e.JSONBlocks),
 		otellog.Bool("is_multimodal", e.IsMultimodal),
+
+		otellog.String("system_text", e.SystemText),
+		otellog.String("last_user_text", e.LastUserText),
 	)
 
 	// Add params as individual attributes
