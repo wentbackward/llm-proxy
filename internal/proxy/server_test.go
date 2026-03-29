@@ -3,9 +3,11 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wentbackward/llm-proxy/internal/config"
@@ -31,22 +33,46 @@ func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.S
 			capture.Path = r.URL.Path
 			capture.Body = body
 		}
-		w.Header().Set("Content-Type", "application/json")
+
+		isStreaming, _ := body["stream"].(bool)
 
 		if r.URL.Path == "/v1/completions" {
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"id":     "cmpl-test",
-				"object": "text_completion",
-				"model":  "test-model",
-				"choices": []interface{}{
-					map[string]interface{}{
-						"index":         0,
-						"finish_reason": "stop",
-						"text":          "completed code here",
+			if isStreaming {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("Connection", "keep-alive")
+				flusher, _ := w.(http.Flusher)
+				chunks := []string{
+					`{"id":"cmpl-test","object":"text_completion","choices":[{"index":0,"text":"completed ","finish_reason":null}]}`,
+					`{"id":"cmpl-test","object":"text_completion","choices":[{"index":0,"text":"code here","finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3}}`,
+				}
+				for _, chunk := range chunks {
+					fmt.Fprintf(w, "data: %s\n\n", chunk)
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				if flusher != nil {
+					flusher.Flush()
+				}
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"id":     "cmpl-test",
+					"object": "text_completion",
+					"model":  "test-model",
+					"choices": []interface{}{
+						map[string]interface{}{
+							"index":         0,
+							"finish_reason": "stop",
+							"text":          "completed code here",
+						},
 					},
-				},
-			})
+				})
+			}
 		} else {
+			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":     "chatcmpl-test",
 				"object": "chat.completion",
@@ -241,5 +267,228 @@ func TestCompletions_ResponsePassedThrough(t *testing.T) {
 	text, _ := choice["text"].(string)
 	if text != "completed code here" {
 		t.Errorf("choice text: got %q, want %q", text, "completed code here")
+	}
+}
+
+// ── Streaming tests ───────────────────────────────────────────────────────────
+
+func TestCompletions_StreamingSSE(t *testing.T) {
+	var captured capturedRequest
+	s, backend := newTestServer(t, &captured)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+		"stream": true,
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	if captured.Path != "/v1/completions" {
+		t.Errorf("streaming should forward to /v1/completions, got %q", captured.Path)
+	}
+
+	respBody := rec.Body.String()
+
+	// Must contain SSE data lines
+	if !strings.Contains(respBody, "data: ") {
+		t.Error("streaming response should contain SSE data lines")
+	}
+
+	// Must contain [DONE] terminator
+	if !strings.Contains(respBody, "data: [DONE]") {
+		t.Error("streaming response should contain [DONE] terminator")
+	}
+
+	// Must contain both chunks' content
+	if !strings.Contains(respBody, "completed ") {
+		t.Error("streaming response should contain first chunk text")
+	}
+	if !strings.Contains(respBody, "code here") {
+		t.Error("streaming response should contain second chunk text")
+	}
+}
+
+func TestCompletions_StreamingContentType(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+		"stream": true,
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	ct := rec.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/event-stream") {
+		t.Errorf("streaming Content-Type should be text/event-stream, got %q", ct)
+	}
+}
+
+func TestCompletions_NonStreamingJSON(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("non-streaming should return 200, got %d", rec.Code)
+	}
+
+	ct := rec.Header().Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("non-streaming Content-Type should be application/json, got %q", ct)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("non-streaming response should be valid JSON: %v", err)
+	}
+}
+
+func TestCompletions_BackendError(t *testing.T) {
+	// Backend that always returns 500
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]string{"message": "internal error"},
+		})
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Backends: []config.Backend{
+			{ID: "test", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30},
+		},
+		Routes: []config.Route{
+			{VirtualModel: "test-model", Backend: "test", RealModel: "test-model"},
+		},
+	}
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg, metrics, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	// Backend returned 500 — proxy should forward it (not crash or hang)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("backend 500 should be forwarded, got %d", rec.Code)
+	}
+}
+
+func TestCompletions_BackendUnreachable(t *testing.T) {
+	cfg := &config.Config{
+		Backends: []config.Backend{
+			{ID: "test", Type: "openai", BaseURL: "http://127.0.0.1:1", TimeoutSeconds: 2},
+		},
+		Routes: []config.Route{
+			{VirtualModel: "test-model", Backend: "test", RealModel: "test-model"},
+		},
+	}
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg, metrics, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("unreachable backend should return 502, got %d", rec.Code)
+	}
+}
+
+func TestCompletions_RequestIDHeader(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	rid := rec.Header().Get("X-Request-ID")
+	if rid == "" {
+		t.Error("response should have X-Request-ID header")
+	}
+	if len(rid) != 8 {
+		t.Errorf("X-Request-ID should be 8 hex chars, got %q", rid)
+	}
+}
+
+func TestCompletions_NoContentInjection(t *testing.T) {
+	var captured capturedRequest
+	s, backend := newTestServer(t, &captured)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test prompt only",
+	})
+
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	// Must NOT have messages — proxy must never inject content
+	if _, hasMessages := captured.Body["messages"]; hasMessages {
+		t.Error("proxy must not inject messages into completions requests")
+	}
+
+	// Must NOT have system prompt
+	if _, hasSystem := captured.Body["system"]; hasSystem {
+		t.Error("proxy must not inject system prompt into completions requests")
+	}
+
+	// Prompt must be exactly what was sent
+	prompt, _ := captured.Body["prompt"].(string)
+	if prompt != "test prompt only" {
+		t.Errorf("prompt should be untouched: got %q, want %q", prompt, "test prompt only")
+	}
+
+	// Body should only contain expected keys
+	for key := range captured.Body {
+		switch key {
+		case "model", "prompt", "stream_options":
+			// expected
+		default:
+			t.Errorf("unexpected key in forwarded body: %q", key)
+		}
 	}
 }

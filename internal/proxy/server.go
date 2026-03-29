@@ -147,13 +147,23 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": data})
 }
 
-// handleProxy is the main entry point for all completion requests.
+// proxyOpts controls per-endpoint behaviour differences in the shared proxy pipeline.
+type proxyOpts struct {
+	pathOverride string // if set, forces the backend request path (e.g. "/v1/completions")
+	protocol     string // if set, skips auto-detection (e.g. "openai" for completions)
+}
+
+// handleProxy is the main entry point for chat completion and Anthropic requests.
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	s.proxyRequest(w, r, proxyOpts{})
+}
 
+// proxyRequest is the shared reverse-proxy pipeline used by all endpoints.
+func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxyOpts) {
 	rid := requestID()
 
 	// ── Read & parse body ──────────────────────────────────────────────────
@@ -184,7 +194,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	logger.Body("[%s] %s %s body: %s", rid, r.Method, r.URL.Path, string(preview))
 
 	// ── Detect protocol ────────────────────────────────────────────────────
-	protocol := detectProtocol(r)
+	protocol := opts.protocol
+	if protocol == "" {
+		protocol = detectProtocol(r)
+	}
 
 	// ── Resolve model → backend ────────────────────────────────────────────
 	modelName, _ := body["model"].(string)
@@ -282,7 +295,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	s.metrics.ActiveRequests.Add(metricsCtx, 1, telemetry.BackendAttrs(backendID, realModel))
 
 	rp := &httputil.ReverseProxy{
-		Director: director(targetURL, backend, newBody, protocol),
+		Director: director(targetURL, backend, newBody, protocol, opts.pathOverride),
 		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
@@ -300,15 +313,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 // director returns an httputil.ReverseProxy Director that rewrites the request
-// for the given backend.
-func director(target *url.URL, backend *config.Backend, body []byte, protocol string) func(*http.Request) {
+// for the given backend. If pathOverride is non-empty, it replaces the request
+// path (used by /v1/completions to force the backend path).
+func director(target *url.URL, backend *config.Backend, body []byte, protocol, pathOverride string) func(*http.Request) {
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.Host = target.Host
-		// req.URL.Path is kept as-is — the proxy receives /v1/chat/completions
-		// and forwards it unchanged. base_url should be scheme+host only
-		// (e.g. http://localhost:3022), not include a /v1 suffix.
+		if pathOverride != "" {
+			req.URL.Path = pathOverride
+		}
+		// When pathOverride is empty, req.URL.Path is kept as-is — the proxy
+		// receives /v1/chat/completions and forwards it unchanged. base_url
+		// should be scheme+host only (e.g. http://localhost:3022).
 
 		// Auth headers
 		if backend.APIKey != "" {
@@ -635,115 +652,18 @@ func logNonStreamingResponse(rid string, data []byte, backendType string) {
 }
 
 // handleCompletions forwards /v1/completions requests to the backend's
-// /v1/completions endpoint. It resolves the model route and applies param
-// merging but does not alter the prompt format — FIM tokens pass through
-// untouched for base models that support fill-in-the-middle.
+// /v1/completions endpoint using the same reverse-proxy infrastructure as
+// handleProxy. FIM tokens pass through untouched — no format translation.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	rid := requestID()
-
-	rawBody, err := io.ReadAll(r.Body)
-	r.Body.Close()
-	if err != nil {
-		jsonError(w, "failed to read request body", http.StatusBadRequest)
-		return
-	}
-
-	var body map[string]interface{}
-	if err := json.Unmarshal(rawBody, &body); err != nil {
-		jsonError(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-
-	// ── Resolve model → backend ────────────────────────────────────────────
-	modelName, _ := body["model"].(string)
-
-	var backend *config.Backend
-	var realModel string
-
-	cfg := s.cfg.Load()
-	rtr := s.rtr.Load()
-
-	res, err := rtr.Resolve(modelName, body)
-	if err != nil {
-		if len(cfg.Backends) == 0 {
-			jsonError(w, "no backends configured", http.StatusServiceUnavailable)
-			return
-		}
-		b := &cfg.Backends[0]
-		backend = b
-		realModel = modelName
-	} else {
-		backend = res.Backend
-		realModel = res.RealModel
-		for k, v := range res.Params {
-			body[k] = v
-		}
-		if _, ok := body["max_tokens"]; ok {
-			delete(body, "max_completion_tokens")
-		}
-	}
-
-	body["model"] = realModel
-
-	logger.Request("[%s] POST /v1/completions model=%s→%s backend=%s",
-		rid, modelName, realModel, backend.ID)
-
-	// ── Re-encode and forward as /v1/completions ──────────────────────────
-	newBody, err := json.Marshal(body)
-	if err != nil {
-		jsonError(w, "failed to encode request", http.StatusInternalServerError)
-		return
-	}
-
-	target, err := url.Parse(backend.BaseURL)
-	if err != nil {
-		jsonError(w, fmt.Sprintf("invalid backend URL: %s", backend.BaseURL), http.StatusInternalServerError)
-		return
-	}
-
-	proxyReq, _ := http.NewRequestWithContext(r.Context(), "POST",
-		target.String()+"/v1/completions", bytes.NewReader(newBody))
-	proxyReq.Header.Set("Content-Type", "application/json")
-	if backend.APIKey != "" {
-		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
-	}
-	w.Header().Set("X-Request-ID", rid)
-
-	client := &http.Client{Timeout: time.Duration(backend.TimeoutSeconds) * time.Second}
-	resp, err := client.Do(proxyReq)
-	if err != nil {
-		logger.Request("[%s] POST /v1/completions model=%s backend=%s ERROR: %v",
-			rid, realModel, backend.ID, err)
-		jsonError(w, "backend error", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	// Copy response headers and status
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	s.proxyRequest(w, r, proxyOpts{
+		pathOverride: "/v1/completions",
+		protocol:     "openai",
+	})
 }
-
-// responseRecorder captures an HTTP response for post-processing.
-type responseRecorder struct {
-	header http.Header
-	body   *bytes.Buffer
-	code   int
-}
-
-func (r *responseRecorder) Header() http.Header         { return r.header }
-func (r *responseRecorder) WriteHeader(code int)         { r.code = code }
-func (r *responseRecorder) Write(b []byte) (int, error)  { return r.body.Write(b) }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
