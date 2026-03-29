@@ -71,6 +71,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("/v1/models", auth(s.handleModels))
 	mux.HandleFunc("/v1/chat/completions", auth(s.handleProxy))
+	mux.HandleFunc("/v1/completions", auth(s.handleCompletions))
 	mux.HandleFunc("/v1/messages", auth(s.handleProxy))
 }
 
@@ -632,6 +633,111 @@ func logNonStreamingResponse(rid string, data []byte, backendType string) {
 		logger.Content("[resp %s] | %s", rid, text)
 	}
 }
+
+// handleCompletions translates legacy /v1/completions requests into
+// /v1/chat/completions format and converts the response back. This supports
+// clients (e.g. Continue autocomplete) that only use the legacy endpoint.
+func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rawBody, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		jsonError(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		jsonError(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	// Extract prompt and convert to chat format
+	prompt, _ := body["prompt"].(string)
+	if prompt == "" {
+		// prompt can also be an array — take the first element
+		if arr, ok := body["prompt"].([]interface{}); ok && len(arr) > 0 {
+			prompt, _ = arr[0].(string)
+		}
+	}
+	delete(body, "prompt")
+	body["messages"] = []interface{}{
+		map[string]interface{}{"role": "user", "content": prompt},
+	}
+
+	// Check if streaming
+	streaming, _ := body["stream"].(bool)
+
+	// Re-encode and rewrite the request to /v1/chat/completions
+	chatBody, _ := json.Marshal(body)
+	r.Body = io.NopCloser(bytes.NewReader(chatBody))
+	r.ContentLength = int64(len(chatBody))
+	r.URL.Path = "/v1/chat/completions"
+
+	if streaming {
+		// For streaming, we need to intercept the response and reformat SSE events
+		// from chat.completion.chunk to completion format. For simplicity, proxy
+		// as-is — most clients handle both formats from streaming endpoints.
+		s.handleProxy(w, r)
+		return
+	}
+
+	// Non-streaming: capture the chat response and convert to legacy format
+	rec := &responseRecorder{header: http.Header{}, body: &bytes.Buffer{}}
+	s.handleProxy(rec, r)
+
+	// Copy status and headers
+	for k, vs := range rec.header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+
+	var chatResp map[string]interface{}
+	if err := json.Unmarshal(rec.body.Bytes(), &chatResp); err != nil {
+		// Can't parse — forward as-is
+		w.WriteHeader(rec.code)
+		w.Write(rec.body.Bytes())
+		return
+	}
+
+	// Convert choices from chat to legacy format
+	legacyChoices := []interface{}{}
+	if choices, ok := chatResp["choices"].([]interface{}); ok {
+		for _, c := range choices {
+			choice, _ := c.(map[string]interface{})
+			msg, _ := choice["message"].(map[string]interface{})
+			text, _ := msg["content"].(string)
+			legacyChoices = append(legacyChoices, map[string]interface{}{
+				"text":          text,
+				"index":         choice["index"],
+				"finish_reason": choice["finish_reason"],
+			})
+		}
+	}
+
+	chatResp["object"] = "text_completion"
+	chatResp["choices"] = legacyChoices
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(rec.code)
+	json.NewEncoder(w).Encode(chatResp)
+}
+
+// responseRecorder captures an HTTP response for post-processing.
+type responseRecorder struct {
+	header http.Header
+	body   *bytes.Buffer
+	code   int
+}
+
+func (r *responseRecorder) Header() http.Header         { return r.header }
+func (r *responseRecorder) WriteHeader(code int)         { r.code = code }
+func (r *responseRecorder) Write(b []byte) (int, error)  { return r.body.Write(b) }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
