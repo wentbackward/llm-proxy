@@ -634,14 +634,17 @@ func logNonStreamingResponse(rid string, data []byte, backendType string) {
 	}
 }
 
-// handleCompletions translates legacy /v1/completions requests into
-// /v1/chat/completions format and converts the response back. This supports
-// clients (e.g. Continue autocomplete) that only use the legacy endpoint.
+// handleCompletions forwards /v1/completions requests to the backend's
+// /v1/completions endpoint. It resolves the model route and applies param
+// merging but does not alter the prompt format — FIM tokens pass through
+// untouched for base models that support fill-in-the-middle.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	rid := requestID()
 
 	rawBody, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -656,76 +659,79 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract prompt and convert to chat format
-	prompt, _ := body["prompt"].(string)
-	if prompt == "" {
-		// prompt can also be an array — take the first element
-		if arr, ok := body["prompt"].([]interface{}); ok && len(arr) > 0 {
-			prompt, _ = arr[0].(string)
+	// ── Resolve model → backend ────────────────────────────────────────────
+	modelName, _ := body["model"].(string)
+
+	var backend *config.Backend
+	var realModel string
+
+	cfg := s.cfg.Load()
+	rtr := s.rtr.Load()
+
+	res, err := rtr.Resolve(modelName, body)
+	if err != nil {
+		if len(cfg.Backends) == 0 {
+			jsonError(w, "no backends configured", http.StatusServiceUnavailable)
+			return
+		}
+		b := &cfg.Backends[0]
+		backend = b
+		realModel = modelName
+	} else {
+		backend = res.Backend
+		realModel = res.RealModel
+		for k, v := range res.Params {
+			body[k] = v
+		}
+		if _, ok := body["max_tokens"]; ok {
+			delete(body, "max_completion_tokens")
 		}
 	}
-	delete(body, "prompt")
-	body["messages"] = []interface{}{
-		map[string]interface{}{"role": "user", "content": prompt},
-	}
 
-	// Check if streaming
-	streaming, _ := body["stream"].(bool)
+	body["model"] = realModel
 
-	// Re-encode and rewrite the request to /v1/chat/completions
-	chatBody, _ := json.Marshal(body)
-	r.Body = io.NopCloser(bytes.NewReader(chatBody))
-	r.ContentLength = int64(len(chatBody))
-	r.URL.Path = "/v1/chat/completions"
+	logger.Request("[%s] POST /v1/completions model=%s→%s backend=%s",
+		rid, modelName, realModel, backend.ID)
 
-	if streaming {
-		// For streaming, we need to intercept the response and reformat SSE events
-		// from chat.completion.chunk to completion format. For simplicity, proxy
-		// as-is — most clients handle both formats from streaming endpoints.
-		s.handleProxy(w, r)
+	// ── Re-encode and forward as /v1/completions ──────────────────────────
+	newBody, err := json.Marshal(body)
+	if err != nil {
+		jsonError(w, "failed to encode request", http.StatusInternalServerError)
 		return
 	}
 
-	// Non-streaming: capture the chat response and convert to legacy format
-	rec := &responseRecorder{header: http.Header{}, body: &bytes.Buffer{}}
-	s.handleProxy(rec, r)
+	target, err := url.Parse(backend.BaseURL)
+	if err != nil {
+		jsonError(w, fmt.Sprintf("invalid backend URL: %s", backend.BaseURL), http.StatusInternalServerError)
+		return
+	}
 
-	// Copy status and headers
-	for k, vs := range rec.header {
+	proxyReq, _ := http.NewRequestWithContext(r.Context(), "POST",
+		target.String()+"/v1/completions", bytes.NewReader(newBody))
+	proxyReq.Header.Set("Content-Type", "application/json")
+	if backend.APIKey != "" {
+		proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
+	}
+	w.Header().Set("X-Request-ID", rid)
+
+	client := &http.Client{Timeout: time.Duration(backend.TimeoutSeconds) * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		logger.Request("[%s] POST /v1/completions model=%s backend=%s ERROR: %v",
+			rid, realModel, backend.ID, err)
+		jsonError(w, "backend error", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response headers and status
+	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
 	}
-
-	var chatResp map[string]interface{}
-	if err := json.Unmarshal(rec.body.Bytes(), &chatResp); err != nil {
-		// Can't parse — forward as-is
-		w.WriteHeader(rec.code)
-		w.Write(rec.body.Bytes())
-		return
-	}
-
-	// Convert choices from chat to legacy format
-	legacyChoices := []interface{}{}
-	if choices, ok := chatResp["choices"].([]interface{}); ok {
-		for _, c := range choices {
-			choice, _ := c.(map[string]interface{})
-			msg, _ := choice["message"].(map[string]interface{})
-			text, _ := msg["content"].(string)
-			legacyChoices = append(legacyChoices, map[string]interface{}{
-				"text":          text,
-				"index":         choice["index"],
-				"finish_reason": choice["finish_reason"],
-			})
-		}
-	}
-
-	chatResp["object"] = "text_completion"
-	chatResp["choices"] = legacyChoices
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(rec.code)
-	json.NewEncoder(w).Encode(chatResp)
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // responseRecorder captures an HTTP response for post-processing.
