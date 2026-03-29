@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/logger"
 	"github.com/wentbackward/llm-proxy/internal/router"
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
@@ -147,6 +148,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ── L2: log headers, L3: log body preview ─────────────────────────────
+	logger.Headers("%s %s", r.Method, r.URL.Path)
+	for k, vs := range r.Header {
+		for _, v := range vs {
+			logger.Headers("  %s: %s", k, v)
+		}
+	}
+	preview := rawBody
+	if len(preview) > 80 {
+		preview = preview[:80]
+	}
+	logger.Body("%s %s body: %s", r.Method, r.URL.Path, string(preview))
+
 	// ── Detect protocol ────────────────────────────────────────────────────
 	protocol := detectProtocol(r)
 
@@ -204,12 +218,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	rp := &httputil.ReverseProxy{
 		Director: director(targetURL, backend, newBody, protocol),
-		ModifyResponse: s.modifyResponse(backendID, realModel, backend.Type, isStreaming, t0, ctx),
+		ModifyResponse: s.modifyResponse(backendID, modelName, realModel, r.URL.Path, backend.Type, isStreaming, t0, ctx),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
 			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, "error"))
+			logger.Request("%s %s model=%s backend=%s status=502 dur=%.3fs ERROR: %v",
+				r.Method, r.URL.Path, modelName, backendID, elapsed, err)
 			log.Printf("[proxy] upstream error backend=%s: %v", backendID, err)
 			jsonError(w, "upstream error: "+err.Error(), http.StatusBadGateway)
 		},
@@ -250,21 +266,23 @@ func director(target *url.URL, backend *config.Backend, body []byte, protocol st
 
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(backendID, model, backendType string, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
+func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backendType string, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
 
 		if streaming && resp.StatusCode == http.StatusOK {
-			parser := newSSEParser(backendID, model, backendType, t0, s.metrics, ctx)
+			parser := newSSEParser(backendID, realModel, backendType, t0, s.metrics, ctx)
 			resp.Body = &interceptedBody{
 				ReadCloser: resp.Body,
 				parser:     parser,
 				onClose: func() {
 					parser.recordFinal()
 					elapsed := time.Since(t0).Seconds()
-					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, model))
-					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, model, statusStr))
-					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, model, statusStr))
+					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
+					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
+					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
+					logger.Request("POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true", path,
+						virtualModel, realModel, backendID, statusStr, elapsed)
 				},
 			}
 		} else {
@@ -275,12 +293,14 @@ func (s *Server) modifyResponse(backendID, model, backendType string, streaming 
 				return err
 			}
 			elapsed := time.Since(t0).Seconds()
-			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, model))
-			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, model, statusStr))
-			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, model, statusStr))
+			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
+			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
+			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
+			logger.Request("POST %s model=%s→%s backend=%s status=%s dur=%.3fs", path,
+				virtualModel, realModel, backendID, statusStr, elapsed)
 
 			if resp.StatusCode == http.StatusOK {
-				extractNonStreamingUsage(data, backendID, model, backendType, s.metrics, ctx)
+				extractNonStreamingUsage(data, backendID, realModel, backendType, s.metrics, ctx)
 			}
 
 			resp.Body = io.NopCloser(bytes.NewReader(data))
