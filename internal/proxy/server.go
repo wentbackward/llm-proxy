@@ -319,6 +319,7 @@ func (s *Server) rewriteModelsResponse(raw []byte) []byte {
 		return raw // pass through unparseable response unchanged
 	}
 
+	seen := make(map[string]bool) // track which real_models appeared upstream
 	out := make([]map[string]interface{}, 0, len(upstream.Data))
 	for _, entry := range upstream.Data {
 		id, _ := entry["id"].(string)
@@ -326,6 +327,7 @@ func (s *Server) rewriteModelsResponse(raw []byte) []byte {
 		if !ok {
 			continue // not a configured model, hide it
 		}
+		seen[id] = true
 		for i, info := range infos {
 			var e map[string]interface{}
 			if i == 0 {
@@ -338,6 +340,23 @@ func (s *Server) rewriteModelsResponse(raw []byte) []byte {
 				}
 			}
 			e["id"] = info.virtualModel
+			if info.contextLength > 0 {
+				e["context_length"] = info.contextLength
+			}
+			out = append(out, e)
+		}
+	}
+
+	// Append routes whose real_model was not in the upstream list (e.g. cloud backends).
+	for realModel, infos := range byReal {
+		if seen[realModel] {
+			continue
+		}
+		for _, info := range infos {
+			e := map[string]interface{}{
+				"id":     info.virtualModel,
+				"object": "model",
+			}
 			if info.contextLength > 0 {
 				e["context_length"] = info.contextLength
 			}
