@@ -6,5 +6,6 @@ COPY . .
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o llm-proxy ./cmd/llm-proxy
 
 FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/llm-proxy /llm-proxy
 ENTRYPOINT ["/llm-proxy"]
