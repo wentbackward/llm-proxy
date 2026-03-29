@@ -87,18 +87,15 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 				req.Header.Set("Authorization", "Bearer "+backend.APIKey)
 			}
 			resp, err := http.DefaultClient.Do(req)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				defer resp.Body.Close()
+			if err == nil {
 				data, readErr := io.ReadAll(resp.Body)
-				if readErr == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK && readErr == nil {
 					rewritten := s.rewriteModelsResponse(data)
 					w.Header().Set("Content-Type", "application/json")
 					w.Write(rewritten)
 					return
 				}
-			}
-			if resp != nil {
-				resp.Body.Close()
 			}
 		}
 		log.Printf("[proxy] /v1/models upstream failed, falling back to static list")
@@ -211,19 +208,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t0 := time.Now()
-	ctx := r.Context()
+	metricsCtx := context.WithoutCancel(r.Context())
 	backendID := backend.ID
 
-	s.metrics.ActiveRequests.Add(ctx, 1, telemetry.BackendAttrs(backendID, realModel))
+	s.metrics.ActiveRequests.Add(metricsCtx, 1, telemetry.BackendAttrs(backendID, realModel))
 
 	rp := &httputil.ReverseProxy{
 		Director: director(targetURL, backend, newBody, protocol),
-		ModifyResponse: s.modifyResponse(backendID, modelName, realModel, r.URL.Path, backend.Type, isStreaming, t0, ctx),
+		ModifyResponse: s.modifyResponse(backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
+			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
-			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
-			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, "error"))
+			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
+			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
 			logger.Request("%s %s model=%s backend=%s status=502 dur=%.3fs ERROR: %v",
 				r.Method, r.URL.Path, modelName, backendID, elapsed, err)
 			log.Printf("[proxy] upstream error backend=%s: %v", backendID, err)
@@ -266,9 +263,15 @@ func director(target *url.URL, backend *config.Backend, body []byte, protocol st
 
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backendType string, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
+func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
+
+		// Wrap with idle timeout if configured — cancels if no bytes
+		// flow for timeout_seconds. Applied before any other wrappers.
+		if timeoutSec > 0 {
+			resp.Body = newIdleTimeoutBody(resp.Body, time.Duration(timeoutSec)*time.Second)
+		}
 
 		if streaming && resp.StatusCode == http.StatusOK {
 			parser := newSSEParser(backendID, realModel, backendType, t0, s.metrics, ctx)

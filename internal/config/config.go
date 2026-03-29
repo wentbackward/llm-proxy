@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -132,6 +134,10 @@ func applyDefaults(cfg *Config) {
 	for i := range cfg.Backends {
 		if cfg.Backends[i].TimeoutSeconds == 0 {
 			cfg.Backends[i].TimeoutSeconds = 300
+		}
+		if u, err := url.Parse(cfg.Backends[i].BaseURL); err == nil {
+			u.Path = strings.TrimSuffix(u.Path, "/v1")
+			cfg.Backends[i].BaseURL = u.String()
 		}
 	}
 }

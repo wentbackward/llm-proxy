@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -141,12 +140,7 @@ func probeBackends(cfg *config.Config) {
 			continue
 		}
 
-		// Use only scheme+host for the probe — base_url may include a model-specific
-		// path (e.g. HuggingFace router) and /v1/models is always at the root.
 		probeURL := b.BaseURL + "/v1/models"
-		if parsed, parseErr := url.Parse(b.BaseURL); parseErr == nil && parsed.Path != "" && parsed.Path != "/" {
-			probeURL = parsed.Scheme + "://" + parsed.Host + "/v1/models"
-		}
 		req, err := http.NewRequest(http.MethodGet, probeURL, nil)
 		if err != nil {
 			log.Printf("[probe] backend %-12s ERROR building request: %v", b.ID, err)
@@ -162,21 +156,23 @@ func probeBackends(cfg *config.Config) {
 			logVirtualModels(byBackend[b.ID])
 			continue
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
 			log.Printf("[probe] backend %-12s OK  (no /v1/models endpoint)", b.ID)
 			logVirtualModels(byBackend[b.ID])
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
 			log.Printf("[probe] backend %-12s HTTP %d", b.ID, resp.StatusCode)
 			logVirtualModels(byBackend[b.ID])
 			continue
 		}
 
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		var result struct {
 			Data []struct {
 				ID string `json:"id"`

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
@@ -234,6 +236,77 @@ func firstDeltaContent(evt map[string]interface{}) (content, reasoning string) {
 	return
 }
 
+// ── idleTimeoutBody ──────────────────────────────────────────────────────────
+
+// idleTimeoutBody wraps a response body and returns an error if no bytes are
+// received within the configured idle duration. The timer resets on every
+// successful read, so long-running streams stay alive as long as data flows.
+//
+// A single background goroutine reads from the underlying body into an internal
+// buffer. Read() pulls from that buffer under a lock, avoiding any data race
+// on caller-owned slices. On timeout, the underlying body is closed which
+// unblocks the goroutine.
+type idleTimeoutBody struct {
+	rc      io.ReadCloser
+	timeout time.Duration
+	timer   *time.Timer
+	ch      chan readResult
+	done    chan struct{}
+}
+
+type readResult struct {
+	buf []byte
+	err error
+}
+
+func newIdleTimeoutBody(rc io.ReadCloser, d time.Duration) *idleTimeoutBody {
+	b := &idleTimeoutBody{
+		rc:      rc,
+		timeout: d,
+		timer:   time.NewTimer(d),
+		ch:      make(chan readResult, 1),
+		done:    make(chan struct{}),
+	}
+	go b.readLoop()
+	return b
+}
+
+// readLoop runs in a single goroutine for the lifetime of the body.
+// It reads into its own buffer so the caller's slice is never shared.
+func (b *idleTimeoutBody) readLoop() {
+	defer close(b.done)
+	for {
+		buf := make([]byte, 32*1024)
+		n, err := b.rc.Read(buf)
+		if n > 0 || err != nil {
+			b.ch <- readResult{buf[:n], err}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (b *idleTimeoutBody) Read(p []byte) (int, error) {
+	select {
+	case r := <-b.ch:
+		if len(r.buf) > 0 {
+			b.timer.Reset(b.timeout)
+		}
+		n := copy(p, r.buf)
+		return n, r.err
+	case <-b.timer.C:
+		// Close underlying reader to unblock readLoop goroutine
+		b.rc.Close()
+		return 0, fmt.Errorf("backend idle timeout (%s)", b.timeout)
+	}
+}
+
+func (b *idleTimeoutBody) Close() error {
+	b.timer.Stop()
+	return b.rc.Close()
+}
+
 // ── interceptedBody ───────────────────────────────────────────────────────────
 
 // interceptedBody wraps an http.Response body, feeding bytes through the SSE
@@ -241,9 +314,9 @@ func firstDeltaContent(evt map[string]interface{}) (content, reasoning string) {
 // the bytes still flow directly to the client.
 type interceptedBody struct {
 	io.ReadCloser
-	parser  *sseParser
-	onClose func()
-	closed  bool
+	parser    *sseParser
+	onClose   func()
+	closeOnce sync.Once
 }
 
 func (b *interceptedBody) Read(p []byte) (n int, err error) {
@@ -255,11 +328,10 @@ func (b *interceptedBody) Read(p []byte) (n int, err error) {
 }
 
 func (b *interceptedBody) Close() error {
-	if !b.closed {
-		b.closed = true
+	b.closeOnce.Do(func() {
 		if b.onClose != nil {
 			b.onClose()
 		}
-	}
+	})
 	return b.ReadCloser.Close()
 }
