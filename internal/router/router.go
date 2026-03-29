@@ -56,7 +56,7 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 	if route.AutoRoute != nil {
 		messages, _ := body["messages"].([]interface{})
 		target := route.AutoRoute.Text
-		if isMultimodal(messages) {
+		if IsMultimodal(messages) {
 			target = route.AutoRoute.Vision
 		}
 		return r.resolve(target, body, depth+1)
@@ -100,9 +100,9 @@ func mergeParams(defaults map[string]interface{}, body map[string]interface{}, c
 	return out
 }
 
-// isMultimodal returns true if any message contains a non-text content part
+// IsMultimodal returns true if any message contains a non-text content part
 // (image, video, document, file).
-func isMultimodal(messages []interface{}) bool {
+func IsMultimodal(messages []interface{}) bool {
 	for _, m := range messages {
 		msg, ok := m.(map[string]interface{})
 		if !ok {

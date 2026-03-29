@@ -103,7 +103,7 @@ func TestMergeParams_NonSamplingKeysIgnored(t *testing.T) {
 
 func TestIsMultimodal_TextOnly(t *testing.T) {
 	msgs := messages("user", "Hello, world")
-	if isMultimodal(msgs) {
+	if IsMultimodal(msgs) {
 		t.Error("plain text should not be multimodal")
 	}
 }
@@ -113,7 +113,7 @@ func TestIsMultimodal_ImageURL(t *testing.T) {
 		map[string]interface{}{"type": "text", "text": "describe this"},
 		map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "https://example.com/img.png"}},
 	})
-	if !isMultimodal(msgs) {
+	if !IsMultimodal(msgs) {
 		t.Error("image_url should be detected as multimodal")
 	}
 }
@@ -122,7 +122,7 @@ func TestIsMultimodal_VideoURL(t *testing.T) {
 	msgs := messagesWithParts("user", []interface{}{
 		map[string]interface{}{"type": "video_url", "video_url": map[string]interface{}{"url": "https://example.com/v.mp4"}},
 	})
-	if !isMultimodal(msgs) {
+	if !IsMultimodal(msgs) {
 		t.Error("video_url should be detected as multimodal")
 	}
 }
@@ -131,7 +131,7 @@ func TestIsMultimodal_Document(t *testing.T) {
 	msgs := messagesWithParts("user", []interface{}{
 		map[string]interface{}{"type": "document"},
 	})
-	if !isMultimodal(msgs) {
+	if !IsMultimodal(msgs) {
 		t.Error("document should be detected as multimodal")
 	}
 }
@@ -141,7 +141,7 @@ func TestIsMultimodal_ArrayContentAllText(t *testing.T) {
 		map[string]interface{}{"type": "text", "text": "a"},
 		map[string]interface{}{"type": "text", "text": "b"},
 	})
-	if isMultimodal(msgs) {
+	if IsMultimodal(msgs) {
 		t.Error("array of text parts should not be multimodal")
 	}
 }

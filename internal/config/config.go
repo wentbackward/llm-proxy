@@ -60,9 +60,15 @@ type Route struct {
 	AutoRoute     *AutoRoute             `yaml:"auto_route"`
 }
 
+type JournalConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	OTLPEndpoint string `yaml:"otlp_endpoint"` // optional — e.g. "http://otel-collector:4318"
+}
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Telemetry TelemetryConfig `yaml:"telemetry"`
+	Journal   JournalConfig   `yaml:"journal"`
 	Backends  []Backend       `yaml:"backends"`
 	Routes    []Route         `yaml:"routes"`
 

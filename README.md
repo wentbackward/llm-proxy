@@ -4,7 +4,7 @@
 [![Release](https://github.com/wentbackward/llm-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/wentbackward/llm-proxy/actions/workflows/release.yml)
 [![Docker](https://img.shields.io/badge/ghcr.io-wentbackward%2Fllm--proxy-blue?logo=docker)](https://github.com/wentbackward/llm-proxy/pkgs/container/llm-proxy)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wentbackward/llm-proxy)](https://goreportcard.com/report/github.com/wentbackward/llm-proxy)
-[![Go Version](https://img.shields.io/badge/go-1.22+-blue)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/go-1.25+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI and Anthropic natively.
@@ -181,14 +181,29 @@ Set `LOG_LEVEL` in the environment (default `0`). `SIGHUP` also reloads this val
 |---|---|
 | `0` | Errors only (default) |
 | `1` | One line per request — method, path, virtual model → real model, backend, status, duration |
-| `2` | Level 1 + all incoming request headers |
+| `2` | Level 1 + incoming request headers + transformation summary (backend, target URL, model rewrite, auth type, merged params) |
 | `3` | Level 2 + first 80 characters of the request body |
+| `4` | Level 3 + full message text content (request and response) |
 
 ```yaml
 # docker-compose.yml
 environment:
   LOG_LEVEL: "1"
 ```
+
+Every request is assigned an 8-character hex interaction ID (e.g. `abc12def`) that appears in all log lines and in the `X-Request-ID` response header. This ties request headers, body, and response together for debugging.
+
+### Request journal
+
+The journal emits a structured OTel log record for every proxied request, containing message statistics (character counts, estimated tokens), structural signals (tool use, code fences, multimodal content), and routing metadata. It flows through OpenTelemetry so it's ready for any OTel-compatible backend (Loki, ClickHouse, etc.).
+
+```yaml
+journal:
+  enabled: true
+  otlp_endpoint: ""  # optional — e.g. "http://otel-collector:4318"
+```
+
+When `otlp_endpoint` is empty, journal records are exported to stdout (visible in `docker logs`). When set, records also flow to the configured OTel collector via OTLP/HTTP.
 
 ## Metrics reference
 

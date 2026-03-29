@@ -12,6 +12,10 @@ telemetry:
     port: 9091
     path: /metrics
 
+journal:
+  enabled: false
+  otlp_endpoint: ""   # e.g. "http://otel-collector:4318"
+
 # Upstream LLM providers
 backends:
   - id: vllm-27b

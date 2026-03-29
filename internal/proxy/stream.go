@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
+
+const maxContentCapture = 32768 // 32KB cap for L4 response capture
 
 // ── SSE parser ────────────────────────────────────────────────────────────────
 
@@ -37,6 +40,11 @@ type sseParser struct {
 	// Anthropic accumulates token counts across events
 	anthropicInputTokens  int64
 	anthropicOutputTokens int64
+
+	// L4 content capture
+	captureContent bool
+	contentBuf     strings.Builder
+	truncated      bool
 }
 
 func newSSEParser(backendID, model, backendType string, t0 time.Time, m *telemetry.Metrics, ctx context.Context) *sseParser {
@@ -110,6 +118,7 @@ func (p *sseParser) handleOpenAIEvent(evt map[string]interface{}) {
 	if content, think := firstDeltaContent(evt); content != "" || think != "" {
 		p.contentChars += int64(len(content))
 		p.thinkChars += int64(len(think))
+		p.appendContent(content)
 	}
 
 	// Usage arrives in the final chunk when stream_options.include_usage=true
@@ -152,6 +161,7 @@ func (p *sseParser) handleAnthropicEvent(evt map[string]interface{}) {
 				p.thinkChars += int64(len(think))
 			} else if dtype == "text_delta" {
 				p.contentChars += int64(len(text))
+				p.appendContent(text)
 			}
 		}
 
@@ -217,6 +227,33 @@ func (p *sseParser) recordFinal() {
 	if p.promptToks > 0 {
 		p.metrics.PromptTokensPerRequest.Record(p.ctx, p.promptToks, attrs)
 	}
+}
+
+// appendContent appends text to the L4 capture buffer, respecting the size cap.
+func (p *sseParser) appendContent(text string) {
+	if !p.captureContent || p.truncated || text == "" {
+		return
+	}
+	remaining := maxContentCapture - p.contentBuf.Len()
+	if remaining <= 0 {
+		p.truncated = true
+		return
+	}
+	if len(text) > remaining {
+		p.contentBuf.WriteString(text[:remaining])
+		p.truncated = true
+	} else {
+		p.contentBuf.WriteString(text)
+	}
+}
+
+// ResponseText returns the captured response text for L4 logging.
+func (p *sseParser) ResponseText() string {
+	s := p.contentBuf.String()
+	if p.truncated {
+		s += " [truncated]"
+	}
+	return s
 }
 
 // firstDeltaContent returns the text content and reasoning/thinking content

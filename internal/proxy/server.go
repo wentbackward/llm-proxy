@@ -4,6 +4,8 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,20 +18,29 @@ import (
 	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/journal"
 	"github.com/wentbackward/llm-proxy/internal/logger"
 	"github.com/wentbackward/llm-proxy/internal/router"
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
+
+// requestID generates a short random hex string for correlating log lines.
+func requestID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 // Server handles all proxy traffic.
 type Server struct {
 	cfg     atomic.Pointer[config.Config]
 	rtr     atomic.Pointer[router.Router]
 	metrics *telemetry.Metrics
+	journal *journal.Journal // nil if journal disabled
 }
 
-func New(cfg *config.Config, metrics *telemetry.Metrics) *Server {
-	s := &Server{metrics: metrics}
+func New(cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
+	s := &Server{metrics: metrics, journal: j}
 	s.cfg.Store(cfg)
 	s.rtr.Store(router.New(cfg))
 	return s
@@ -142,6 +153,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rid := requestID()
+
 	// ── Read & parse body ──────────────────────────────────────────────────
 	rawBody, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -156,18 +169,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── L2: log headers, L3: log body preview ─────────────────────────────
-	logger.Headers("%s %s", r.Method, r.URL.Path)
+	// ── L2: log incoming headers, L3: log body preview ────────────────────
+	logger.Headers("[%s] %s %s", rid, r.Method, r.URL.Path)
 	for k, vs := range r.Header {
 		for _, v := range vs {
-			logger.Headers("  %s: %s", k, v)
+			logger.Headers("[%s]   %s: %s", rid, k, v)
 		}
 	}
 	preview := rawBody
 	if len(preview) > 80 {
 		preview = preview[:80]
 	}
-	logger.Body("%s %s body: %s", r.Method, r.URL.Path, string(preview))
+	logger.Body("[%s] %s %s body: %s", rid, r.Method, r.URL.Path, string(preview))
 
 	// ── Detect protocol ────────────────────────────────────────────────────
 	protocol := detectProtocol(r)
@@ -204,6 +217,41 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	body["model"] = realModel
 	isStreaming, _ := body["stream"].(bool)
 
+	// ── L2: log transformation summary ─────────────────────────────────────
+	authType := "none"
+	if backend.APIKey != "" {
+		if backend.Type == "anthropic" {
+			authType = "x-api-key"
+		} else {
+			authType = "bearer"
+		}
+	}
+	if res != nil && len(res.Params) > 0 {
+		logger.Headers("[%s] → backend=%s target=%s model=%s→%s auth=%s params=%v",
+			rid, backend.ID, backend.BaseURL, modelName, realModel, authType, res.Params)
+	} else {
+		logger.Headers("[%s] → backend=%s target=%s model=%s→%s auth=%s",
+			rid, backend.ID, backend.BaseURL, modelName, realModel, authType)
+	}
+
+	// ── L4: log full message content ───────────────────────────────────────
+	if logger.Get() >= logger.LevelContent {
+		logMessageContent(rid, body, protocol)
+	}
+
+	// ── Journal: emit structured analysis ──────────────────────────────────
+	if s.journal != nil {
+		entry := journal.Analyze(body, protocol)
+		entry.RequestID = rid
+		entry.VirtualModel = modelName
+		entry.RealModel = realModel
+		entry.Backend = backend.ID
+		if res != nil {
+			entry.Params = res.Params
+		}
+		s.journal.Log(r.Context(), entry)
+	}
+
 	// ── Protocol-specific param translation ────────────────────────────────
 	translateParams(body, backend, isStreaming)
 
@@ -225,18 +273,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	metricsCtx := context.WithoutCancel(r.Context())
 	backendID := backend.ID
 
+	w.Header().Set("X-Request-ID", rid)
 	s.metrics.ActiveRequests.Add(metricsCtx, 1, telemetry.BackendAttrs(backendID, realModel))
 
 	rp := &httputil.ReverseProxy{
 		Director: director(targetURL, backend, newBody, protocol),
-		ModifyResponse: s.modifyResponse(backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx),
+		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
 			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
-			logger.Request("%s %s model=%s backend=%s status=502 dur=%.3fs ERROR: %v",
-				r.Method, r.URL.Path, modelName, backendID, elapsed, err)
+			logger.Request("[%s] %s %s model=%s backend=%s status=502 dur=%.3fs ERROR: %v",
+				rid, r.Method, r.URL.Path, modelName, backendID, elapsed, err)
 			log.Printf("[proxy] upstream error backend=%s: %v", backendID, err)
 			jsonError(w, "upstream error: "+err.Error(), http.StatusBadGateway)
 		},
@@ -275,9 +324,53 @@ func director(target *url.URL, backend *config.Backend, body []byte, protocol st
 	}
 }
 
+// logMessageContent logs full text content of each message at L4.
+func logMessageContent(rid string, body map[string]interface{}, protocol string) {
+	// OpenAI: messages[].content (string or array of content blocks)
+	// Anthropic: system (string) + messages[].content (string or array)
+	if sys, ok := body["system"].(string); ok && sys != "" {
+		logger.Content("[msg %s] role=system | %s", rid, sys)
+	}
+	messages, _ := body["messages"].([]interface{})
+	for _, m := range messages {
+		msg, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		switch content := msg["content"].(type) {
+		case string:
+			logger.Content("[msg %s] role=%s | %s", rid, role, content)
+		case []interface{}:
+			var parts []string
+			for _, p := range content {
+				part, ok := p.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				switch part["type"] {
+				case "text":
+					text, _ := part["text"].(string)
+					parts = append(parts, text)
+				case "image_url", "image":
+					parts = append(parts, "[image]")
+				case "video_url", "video":
+					parts = append(parts, "[video]")
+				case "document", "file":
+					parts = append(parts, "[document]")
+				default:
+					t, _ := part["type"].(string)
+					parts = append(parts, "["+t+"]")
+				}
+			}
+			logger.Content("[msg %s] role=%s | %s", rid, role, strings.Join(parts, " "))
+		}
+	}
+}
+
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
+func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
 
@@ -289,6 +382,9 @@ func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backen
 
 		if streaming && resp.StatusCode == http.StatusOK {
 			parser := newSSEParser(backendID, realModel, backendType, t0, s.metrics, ctx)
+			if logger.Get() >= logger.LevelContent {
+				parser.captureContent = true
+			}
 			resp.Body = &interceptedBody{
 				ReadCloser: resp.Body,
 				parser:     parser,
@@ -298,8 +394,11 @@ func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backen
 					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
 					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
-					logger.Request("POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true", path,
-						virtualModel, realModel, backendID, statusStr, elapsed)
+					logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true",
+						rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
+					if parser.captureContent {
+						logger.Content("[resp %s] | %s", rid, parser.ResponseText())
+					}
 				},
 			}
 		} else {
@@ -313,11 +412,16 @@ func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backen
 			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
 			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
-			logger.Request("POST %s model=%s→%s backend=%s status=%s dur=%.3fs", path,
-				virtualModel, realModel, backendID, statusStr, elapsed)
+			logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs",
+				rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
 
 			if resp.StatusCode == http.StatusOK {
 				extractNonStreamingUsage(data, backendID, realModel, backendType, s.metrics, ctx)
+			}
+
+			// L4: log non-streaming response content
+			if logger.Get() >= logger.LevelContent {
+				logNonStreamingResponse(rid, data, backendType)
 			}
 
 			resp.Body = io.NopCloser(bytes.NewReader(data))
@@ -489,6 +593,39 @@ func extractNonStreamingUsage(data []byte, backendID, model, backendType string,
 		if v, _ := usage[completionKey].(float64); v > 0 {
 			m.CompletionTokens.Add(ctx, int64(v), attrs)
 		}
+	}
+}
+
+// logNonStreamingResponse extracts and logs the assistant's text content from a non-streaming response.
+func logNonStreamingResponse(rid string, data []byte, backendType string) {
+	var resp map[string]interface{}
+	if json.Unmarshal(data, &resp) != nil {
+		return
+	}
+	var text string
+	if backendType == "anthropic" {
+		// Anthropic: content[].text
+		if content, ok := resp["content"].([]interface{}); ok {
+			for _, c := range content {
+				block, _ := c.(map[string]interface{})
+				if t, _ := block["text"].(string); t != "" {
+					text += t
+				}
+			}
+		}
+	} else {
+		// OpenAI: choices[0].message.content
+		if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
+			choice, _ := choices[0].(map[string]interface{})
+			msg, _ := choice["message"].(map[string]interface{})
+			text, _ = msg["content"].(string)
+		}
+	}
+	if text != "" {
+		if len(text) > 32768 {
+			text = text[:32768] + " [truncated]"
+		}
+		logger.Content("[resp %s] | %s", rid, text)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/llm-proxy/internal/journal"
 	"github.com/wentbackward/llm-proxy/internal/logger"
 	"github.com/wentbackward/llm-proxy/internal/proxy"
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
@@ -34,12 +35,23 @@ func main() {
 		log.Fatalf("telemetry: %v", err)
 	}
 
+	// ── Journal ───────────────────────────────────────────────────────────
+	var j *journal.Journal
+	if cfg.Journal.Enabled {
+		var err error
+		j, err = journal.New(cfg.Journal.OTLPEndpoint)
+		if err != nil {
+			log.Fatalf("journal: %v", err)
+		}
+		log.Println("[llm-proxy] journal enabled")
+	}
+
 	// ── Startup backend probes ─────────────────────────────────────────────
 	probeBackends(cfg)
 
 	// ── Proxy server ───────────────────────────────────────────────────────
 	proxyMux := http.NewServeMux()
-	srv := proxy.New(cfg, metrics)
+	srv := proxy.New(cfg, metrics, j)
 	srv.RegisterRoutes(proxyMux)
 
 	proxyAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -118,6 +130,9 @@ func main() {
 	proxyServer.Shutdown(ctx)
 	if metricsServer != nil {
 		metricsServer.Shutdown(ctx)
+	}
+	if j != nil {
+		j.Shutdown(ctx)
 	}
 }
 

@@ -4,8 +4,9 @@
 //
 //	0 = errors only (default)
 //	1 = requests — method, path, model, status, duration
-//	2 = headers  — level 1 + request headers
+//	2 = headers  — level 1 + incoming headers + transformation summary
 //	3 = body     — level 2 + first 80 chars of request body
+//	4 = content  — level 3 + full message text (request and response)
 //
 // Set LOG_LEVEL=<n> in the environment. Send SIGHUP to reload from the
 // environment without restarting: docker kill --signal=HUP llm-proxy
@@ -23,6 +24,7 @@ const (
 	LevelRequest = 1
 	LevelHeaders = 2
 	LevelBody    = 3
+	LevelContent = 4
 )
 
 var current atomic.Int32
@@ -36,7 +38,7 @@ func init() {
 func Reload() {
 	l := LevelError
 	if s := os.Getenv("LOG_LEVEL"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 0 && n <= 3 {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 && n <= 4 {
 			l = n
 		}
 	}
@@ -65,5 +67,12 @@ func Headers(format string, args ...interface{}) {
 func Body(format string, args ...interface{}) {
 	if Get() >= LevelBody {
 		log.Printf("[body] "+format, args...)
+	}
+}
+
+// Content logs at level 4.
+func Content(format string, args ...interface{}) {
+	if Get() >= LevelContent {
+		log.Printf(format, args...)
 	}
 }
