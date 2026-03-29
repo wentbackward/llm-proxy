@@ -666,6 +666,10 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(body, "prompt")
 	body["messages"] = []interface{}{
+		map[string]interface{}{
+			"role":    "system",
+			"content": "You are a code completion engine. Output ONLY the code that should come next. No explanations, no markdown, no commentary. Just the raw code completion.",
+		},
 		map[string]interface{}{"role": "user", "content": prompt},
 	}
 
