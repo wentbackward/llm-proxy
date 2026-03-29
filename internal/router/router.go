@@ -11,7 +11,8 @@ import (
 // samplingKeys is the set of parameters that may be overridden by route profiles.
 var samplingKeys = map[string]bool{
 	"temperature": true, "top_p": true, "top_k": true,
-	"max_tokens": true, "presence_penalty": true,
+	"max_tokens": true, "max_completion_tokens": true,
+	"presence_penalty": true,
 	"frequency_penalty": true, "seed": true, "stop": true,
 	"enable_thinking": true, "thinking_budget": true,
 }

@@ -212,6 +212,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		for k, v := range res.Params {
 			body[k] = v
 		}
+		// Deduplicate max_tokens vs max_completion_tokens — backends reject both
+		if _, ok := body["max_tokens"]; ok {
+			delete(body, "max_completion_tokens")
+		}
 	}
 
 	body["model"] = realModel
