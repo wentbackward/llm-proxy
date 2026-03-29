@@ -7,66 +7,40 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-One endpoint for all your LLMs. Point your client at llm-proxy and let config decide which backend answers.
+One config file, one endpoint, every LLM. Connect any client that speaks OpenAI or Anthropic to any combination of local and cloud backends.
 
-```yaml
-backends:
-  - id: anthropic
-    type: anthropic
-    base_url: https://api.anthropic.com
-    api_key: ${ANTHROPIC_API_KEY}
-
-  - id: gemini
-    type: openai
-    base_url: https://generativelanguage.googleapis.com/v1beta/openai
-    api_key: ${GEMINI_API_KEY}
-
-  - id: local
-    type: openai
-    base_url: http://localhost:11434   # ollama, vLLM, anything OpenAI-compatible
-
-routes:
-  - virtual_model: coder
-    backend: anthropic
-    real_model: claude-sonnet-4-6
-    defaults: { temperature: 0.2, enable_thinking: true }
-
-  - virtual_model: researcher
-    backend: gemini
-    real_model: gemini-2.5-pro
-    defaults: { temperature: 0.5, max_tokens: 16384 }
-
-  - virtual_model: fast
-    backend: local
-    real_model: qwen3.5:latest
-    defaults: { temperature: 0.7, enable_thinking: false }
-
-  - virtual_model: auto
-    auto_route:
-      text: fast
-      vision: researcher
+```
+client → llm-proxy:4000/v1 → vLLM (local)
+                             → Anthropic (cloud)
+                             → HuggingFace (cloud)
+                             → any OpenAI-compatible API
 ```
 
-Your client connects to `http://localhost:4000/v1` and picks a virtual model. The proxy handles the rest — rewrites the model name, sets auth headers, applies parameter profiles, and forwards to the right backend. Switch models in your UI to change behaviour. Swap backends in config to change providers. No code changes, no redeployment.
+## What it does
 
-## Why
+**Unify your backends.** Point your client at one URL. The proxy speaks OpenAI and Anthropic natively — no protocol translation, just direct forwarding with the right auth headers and model names.
 
-- You have accounts with multiple LLM providers and want one API endpoint
-- You're running local models (vLLM, ollama) alongside cloud APIs
-- You want to control temperature, thinking, and token limits per use-case without touching your app
-- You're serving multiple users and want to minimise cloud spend by routing to local models first
+**Virtual models.** Name the same underlying model multiple times with different parameter profiles. A `coder` with low temperature and thinking enabled, a `creative` with high temperature and thinking off — same model, different behaviour. Clients just switch the model name.
 
-## Features
+```yaml
+routes:
+  - virtual_model: coder
+    backend: local
+    real_model: "Qwen/Qwen3.5-35B-A3B-FP8"
+    defaults: { temperature: 0.2, enable_thinking: true, max_tokens: 16384 }
+    clamp: { enable_thinking: true }
 
-- **Speaks OpenAI and Anthropic natively** — forwards each in its own format, no translation
-- **Virtual models** — named personalities over real models with parameter profiles (defaults/clamp)
-- **Content-based auto-routing** — text to one model, images to another, more categories coming
-- **OpenTelemetry metrics** — TTFT, duration, tokens, active requests; Prometheus by default
-- **Request journal** — structured OTel log records for every request, ready for Loki/ClickHouse
-- **Zero-copy streaming** — SSE responses flow directly to the client; metrics parsed from the byte stream
-- **`enable_thinking` abstraction** — one flag, translated per backend (vLLM, Anthropic, etc.)
-- **Hot reload** — `SIGHUP` reloads config, re-probes backends, no restart needed
-- **Single static binary** — no runtime, no dependencies; ~7 MB Docker image on `scratch`
+  - virtual_model: creative
+    backend: local
+    real_model: "Qwen/Qwen3.5-35B-A3B-FP8"
+    defaults: { temperature: 0.9, enable_thinking: false, max_tokens: 8192 }
+```
+
+**Parameter control.** Three-layer merge: `defaults < caller < clamp`. Set sensible defaults, let callers override what you allow, lock down what they can't. `enable_thinking` is translated per backend — one flag works for vLLM/Qwen and Anthropic.
+
+**Observability.** OpenTelemetry metrics out of the box — TTFT, request duration, token counts, active requests, generation speed. Prometheus exporter, ready for Grafana. Request journal logs structured data about every request for analysis.
+
+**Zero overhead.** SSE streams flow directly to the client. Metrics are parsed from the byte stream without buffering. Single static Go binary, ~7 MB Docker image on `scratch`.
 
 ## Quick start
 
@@ -78,10 +52,36 @@ docker compose up -d
 
 Point your client at `http://localhost:4000/v1`. Metrics at `http://localhost:9091/metrics`.
 
+## Configuration
+
+```yaml
+backends:
+  - id: local
+    type: openai
+    base_url: "http://gpu-server:8000"
+    timeout_seconds: 300
+
+  - id: anthropic
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    api_key: "${ANTHROPIC_API_KEY}"
+    skip_probe: true
+
+  - id: hf
+    type: openai
+    base_url: "https://router.huggingface.co"
+    api_key: "${HF_TOKEN}"
+    skip_probe: true
+```
+
+Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config. Hot-reload with `SIGHUP` — config, log level, and backend probes update without restart.
+
+See the [full configuration reference](docs/configuration.md) for TLS, auto-routing, parameter profiles, and more.
+
 ## Documentation
 
-- **[Configuration](docs/configuration.md)** — backends, routes, virtual models, parameter profiles, TLS, environment variables
-- **[Logging and diagnostics](docs/logging.md)** — log levels, interaction IDs, request journal, startup probes, SIGHUP reload
+- **[Configuration](docs/configuration.md)** — backends, routes, virtual models, parameter profiles, TLS
+- **[Logging and diagnostics](docs/logging.md)** — log levels, interaction IDs, request journal, hot reload
 - **[Metrics](docs/metrics.md)** — OTel/Prometheus metrics reference
 - **[Development](docs/development.md)** — building, testing, project structure
 
