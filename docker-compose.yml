@@ -17,6 +17,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       VLLM_API_KEY: ${VLLM_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-0}
     dns:
       - 100.100.100.100   # Tailscale MagicDNS
       - 8.8.8.8

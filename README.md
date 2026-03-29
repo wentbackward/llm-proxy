@@ -165,11 +165,13 @@ backends:
     skip_probe: true
 ```
 
-Probe output is always printed regardless of log level. Send `SIGHUP` to re-probe without restarting:
+Probe output is always printed regardless of log level. Send `SIGHUP` to reload the entire config, log level, and re-probe all backends — no restart needed:
 
 ```bash
 docker kill --signal=HUP llm-proxy
 ```
+
+This picks up changes to backends, routes, API keys, and log level. If the new config fails to parse, the old config is kept and an error is logged.
 
 ### Log levels
 

@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/config"
@@ -22,17 +23,29 @@ import (
 
 // Server handles all proxy traffic.
 type Server struct {
-	cfg     *config.Config
-	router  *router.Router
+	cfg     atomic.Pointer[config.Config]
+	rtr     atomic.Pointer[router.Router]
 	metrics *telemetry.Metrics
 }
 
 func New(cfg *config.Config, metrics *telemetry.Metrics) *Server {
-	return &Server{
-		cfg:     cfg,
-		router:  router.New(cfg),
-		metrics: metrics,
-	}
+	s := &Server{metrics: metrics}
+	s.cfg.Store(cfg)
+	s.rtr.Store(router.New(cfg))
+	return s
+}
+
+// Reload atomically swaps in a new config and router.
+// In-flight requests continue with the old config.
+func (s *Server) Reload(cfg *config.Config) {
+	s.rtr.Store(router.New(cfg))
+	s.cfg.Store(cfg)
+	log.Printf("[proxy] config reloaded: %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
+}
+
+// Config returns the current config (for use by main.go probes etc.)
+func (s *Server) Config() *config.Config {
+	return s.cfg.Load()
 }
 
 // RegisterRoutes attaches all proxy endpoints to mux.
@@ -51,15 +64,11 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // bearerAuth wraps a handler with bearer token authentication.
-// If no api_key is configured the handler is returned unwrapped.
+// Checks the current config on each request so api_key changes take effect on reload.
 func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
-	key := s.cfg.Server.APIKey
-	if key == "" {
-		return next
-	}
-	expected := "Bearer " + key
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != expected {
+		key := s.cfg.Load().Server.APIKey
+		if key != "" && r.Header.Get("Authorization") != "Bearer "+key {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-proxy"`)
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -78,8 +87,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(s.cfg.Backends) > 0 {
-		backend := &s.cfg.Backends[0]
+	cfg := s.cfg.Load()
+
+	if len(cfg.Backends) > 0 {
+		backend := &cfg.Backends[0]
 		upURL := backend.BaseURL + "/v1/models"
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, nil)
 		if err == nil {
@@ -91,7 +102,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 				data, readErr := io.ReadAll(resp.Body)
 				resp.Body.Close()
 				if resp.StatusCode == http.StatusOK && readErr == nil {
-					rewritten := s.rewriteModelsResponse(data)
+					rewritten := s.rewriteModelsResponse(data, cfg)
 					w.Header().Set("Content-Type", "application/json")
 					w.Write(rewritten)
 					return
@@ -109,7 +120,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		OwnedBy string `json:"owned_by"`
 	}
 	var data []modelEntry
-	for _, route := range s.cfg.Routes {
+	for _, route := range cfg.Routes {
 		if route.AutoRoute != nil {
 			continue // skip auto-route entries; they resolve to real routes
 		}
@@ -167,14 +178,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var backend *config.Backend
 	var realModel string
 
-	res, err := s.router.Resolve(modelName, body)
+	cfg := s.cfg.Load()
+	rtr := s.rtr.Load()
+
+	res, err := rtr.Resolve(modelName, body)
 	if err != nil {
 		// No route configured — pass through to first backend if available.
-		if len(s.cfg.Backends) == 0 {
+		if len(cfg.Backends) == 0 {
 			jsonError(w, "no backends configured", http.StatusServiceUnavailable)
 			return
 		}
-		b := &s.cfg.Backends[0]
+		b := &cfg.Backends[0]
 		backend = b
 		realModel = modelName
 		log.Printf("[proxy] no route for %q, passing through to %s", modelName, b.ID)
@@ -319,15 +333,15 @@ func (s *Server) modifyResponse(backendID, virtualModel, realModel, path, backen
 //   - model entries whose id matches a route's real_model are renamed to the virtual_model name
 //   - if the route has context_length set, context_length is overridden in the entry
 //   - entries with no matching route are dropped (they are internal implementation names)
-func (s *Server) rewriteModelsResponse(raw []byte) []byte {
+func (s *Server) rewriteModelsResponse(raw []byte, cfg *config.Config) []byte {
 	// Build real_model → []route lookup (skip auto-route entries).
 	// Multiple virtual models may share the same real_model.
 	type routeInfo struct {
 		virtualModel  string
 		contextLength int
 	}
-	byReal := make(map[string][]routeInfo, len(s.cfg.Routes))
-	for _, r := range s.cfg.Routes {
+	byReal := make(map[string][]routeInfo, len(cfg.Routes))
+	for _, r := range cfg.Routes {
 		if r.AutoRoute != nil || r.RealModel == "" {
 			continue
 		}

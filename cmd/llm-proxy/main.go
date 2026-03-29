@@ -39,7 +39,8 @@ func main() {
 
 	// ── Proxy server ───────────────────────────────────────────────────────
 	proxyMux := http.NewServeMux()
-	proxy.New(cfg, metrics).RegisterRoutes(proxyMux)
+	srv := proxy.New(cfg, metrics)
+	srv.RegisterRoutes(proxyMux)
 
 	proxyAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	proxyServer := &http.Server{
@@ -96,9 +97,15 @@ func main() {
 
 	go func() {
 		for range hup {
-			log.Println("[llm-proxy] SIGHUP received — reloading log level and re-probing backends")
+			log.Println("[llm-proxy] SIGHUP received — reloading config")
 			logger.Reload()
-			probeBackends(cfg)
+			newCfg, err := config.Load(cfgPath)
+			if err != nil {
+				log.Printf("[llm-proxy] config reload failed: %v (keeping old config)", err)
+			} else {
+				srv.Reload(newCfg)
+			}
+			probeBackends(srv.Config())
 		}
 	}()
 
