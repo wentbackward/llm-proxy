@@ -7,29 +7,66 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-A transparent, high-performance reverse proxy for LLM APIs that speaks OpenAI and Anthropic natively.
+One endpoint for all your LLMs. Point your client at llm-proxy and let config decide which backend answers.
 
-| 📡 OpenTelemetry | 🎛 Inject Params |
-|---|---|
-| TTFT, tokens, latency — out of the box, for any client and any backend, with zero code changes | Set defaults, enforce limits, or clamp values per model. Take control of every call without touching your app |
+```yaml
+backends:
+  - id: anthropic
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key: ${ANTHROPIC_API_KEY}
 
-| 🏷️ Virtual Models | ⚙️ Simple Admin |
-|---|---|
-| Uniquely name the same underlying model with different temperature, thinking budget, and token limits — clients just switch models to change behaviour, on the fly | Swap models or backends for every client at once with a single config change — no redeployments, no coordination |
+  - id: gemini
+    type: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key: ${GEMINI_API_KEY}
 
-Written in Go — a single, self-contained binary with no runtime dependencies. Handles high request volume with minimal overhead. Docker images available for Linux, macOS and Windows across amd64 and arm64.
+  - id: local
+    type: openai
+    base_url: http://localhost:11434   # ollama, vLLM, anything OpenAI-compatible
+
+routes:
+  - virtual_model: coder
+    backend: anthropic
+    real_model: claude-sonnet-4-6
+    defaults: { temperature: 0.2, enable_thinking: true }
+
+  - virtual_model: researcher
+    backend: gemini
+    real_model: gemini-2.5-pro
+    defaults: { temperature: 0.5, max_tokens: 16384 }
+
+  - virtual_model: fast
+    backend: local
+    real_model: qwen3.5:latest
+    defaults: { temperature: 0.7, enable_thinking: false }
+
+  - virtual_model: auto
+    auto_route:
+      text: fast
+      vision: researcher
+```
+
+Your client connects to `http://localhost:4000/v1` and picks a virtual model. The proxy handles the rest — rewrites the model name, sets auth headers, applies parameter profiles, and forwards to the right backend. Switch models in your UI to change behaviour. Swap backends in config to change providers. No code changes, no redeployment.
+
+## Why
+
+- You have accounts with multiple LLM providers and want one API endpoint
+- You're running local models (vLLM, ollama) alongside cloud APIs
+- You want to control temperature, thinking, and token limits per use-case without touching your app
+- You're serving multiple users and want to minimise cloud spend by routing to local models first
 
 ## Features
 
-- **Protocol-aware passthrough** — understands OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) natively; forwards each in its own format with no translation required
-- **OpenTelemetry metrics** — TTFT, end-to-end duration, prompt/completion tokens, active requests; exported as Prometheus by default, OTLP-ready
-- **Zero-copy streaming** — SSE responses flow directly to the client; the proxy parses metrics from the byte stream without buffering
-- **Virtual model aliases** — map friendly names (`gresh-flash`, `claude-sonnet`) to real model IDs on any backend
-- **Parameter profiles** — set defaults and clamp values per model; caller params slot in between (`defaults < caller < clamp`)
-- **Content-based auto-routing** — `gresh-auto` inspects message content and routes text to a fast model, images/video/documents to a vision model. With no route configured, requests pass through as-is — capability errors (e.g. sending multimodal content to a text-only model) are the backend's to return, not the proxy's to prevent
-- **`enable_thinking` abstraction** — a single flag translated to the right backend: `chat_template_kwargs` for vLLM/Qwen3, `thinking` block for Anthropic
-- **Config-driven** — all hosts, ports, model names and secrets in one YAML file; `${ENV_VAR}` templating keeps secrets out of config files
-- **Single static binary** — no runtime, no dependencies; ~7 MB Docker image built on `scratch`
+- **Speaks OpenAI and Anthropic natively** — forwards each in its own format, no translation
+- **Virtual models** — named personalities over real models with parameter profiles (defaults/clamp)
+- **Content-based auto-routing** — text to one model, images to another, more categories coming
+- **OpenTelemetry metrics** — TTFT, duration, tokens, active requests; Prometheus by default
+- **Request journal** — structured OTel log records for every request, ready for Loki/ClickHouse
+- **Zero-copy streaming** — SSE responses flow directly to the client; metrics parsed from the byte stream
+- **`enable_thinking` abstraction** — one flag, translated per backend (vLLM, Anthropic, etc.)
+- **Hot reload** — `SIGHUP` reloads config, re-probes backends, no restart needed
+- **Single static binary** — no runtime, no dependencies; ~7 MB Docker image on `scratch`
 
 ## Quick start
 
@@ -39,194 +76,14 @@ cp config.example.yaml config.yaml
 docker compose up -d
 ```
 
-Point your OpenAI SDK at `http://localhost:4000/v1` or your Anthropic SDK at `http://localhost:4000`. Everything else stays the same.
+Point your client at `http://localhost:4000/v1`. Metrics at `http://localhost:9091/metrics`.
 
-Metrics are available at `http://localhost:9091/metrics`.
+## Documentation
 
-### TLS with Tailscale
-
-If you're running on a Tailscale network, provision a cert for your node and point the proxy at it:
-
-```bash
-tailscale cert spark-01.your-tailnet.ts.net
-```
-
-Then in `config.yaml`:
-
-```yaml
-server:
-  api_key: "${PROXY_API_KEY}"
-  tls:
-    cert: /certs/spark-01.your-tailnet.ts.net.crt
-    key:  /certs/spark-01.your-tailnet.ts.net.key
-```
-
-Clients then connect to `https://spark-01.your-tailnet.ts.net:4000/v1` with `Authorization: Bearer <key>`.
-
-## Configuration
-
-```yaml
-server:
-  host: "0.0.0.0"
-  port: 4000
-
-telemetry:
-  prometheus:
-    enabled: true
-    port: 9091
-    path: /metrics
-
-backends:
-  - id: my-vllm
-    type: openai                          # openai | anthropic
-    base_url: "http://gpu-server:8000/v1"
-    api_key: "${VLLM_API_KEY}"            # ${ENV_VAR} expanded at startup
-    timeout_seconds: 300
-
-  - id: anthropic
-    type: anthropic
-    base_url: "https://api.anthropic.com"
-    api_key: "${ANTHROPIC_API_KEY}"
-
-routes:                                   # optional — omit to run as pure proxy
-  - virtual_model: my-fast
-    backend: my-vllm
-    real_model: "Qwen/Qwen2.5-7B-Instruct"
-    defaults:
-      temperature: 0.7
-      enable_thinking: true
-    clamp:
-      enable_thinking: true               # caller cannot disable this
-
-  - virtual_model: my-auto
-    auto_route:
-      text: my-fast                       # plain text → fast model
-      vision: my-vision                   # images/video/docs → vision model
-```
-
-All fields under `server`, `backends`, and `routes` — including ports, model IDs, and URLs — live in this file. Secrets use `${ENV_VAR}` syntax and are never read from the config file directly.
-
-## Virtual models
-
-A virtual model is a named personality layered over a real model. Multiple virtual models can point to the same underlying model with different parameter profiles — clients simply switch models in their UI to change behaviour.
-
-```yaml
-routes:
-  # Relaxed, creative — high temperature, long replies
-  - virtual_model: my-fast
-    backend: my-vllm
-    real_model: "Qwen/Qwen3.5-9B"
-    defaults:
-      temperature: 0.8
-      max_tokens: 8192
-
-  # Precise, focused — lower temperature, thinking forced on
-  - virtual_model: my-coder
-    backend: my-vllm
-    real_model: "Qwen/Qwen3.5-9B"        # same model, different behaviour
-    defaults:
-      temperature: 0.2
-      max_tokens: 4096
-    clamp:
-      enable_thinking: true               # caller cannot disable this
-      presence_penalty: 0.0
-```
-
-Both models appear in `/v1/models` and are selectable from any client. Switching from `my-fast` to `my-coder` in the UI is all that's needed to test a different parameter set — no API changes, no redeployment, no secret sharing with clients.
-
-Use `context_length` to override what clients see in the model card, preventing them from requesting more context than your GPU can actually serve:
-
-```yaml
-  - virtual_model: my-fast
-    context_length: 131072               # reported to clients; 0 = pass through from upstream
-```
-
-## Logging and diagnostics
-
-At startup the proxy probes every configured backend, logs whether it is reachable, lists the models it reports, and maps each one to its virtual model names:
-
-```
-[probe] backend vllm         OK  upstream models: [Qwen/Qwen3.5-9B]
-[probe]   → my-fast                          (real: Qwen/Qwen3.5-9B)
-[probe]   → my-coder                         (real: Qwen/Qwen3.5-9B)
-[probe] backend anthropic    OK  upstream models: []
-[probe]   → claude-sonnet                    (real: claude-sonnet-4-6-20251001)
-[probe] backend hf-serverless UNREACHABLE: dial tcp ...: connection refused
-```
-
-Cloud APIs (Anthropic, OpenAI, HuggingFace) don't expose `/v1/models` — set `skip_probe: true` on those backends to suppress the 404 noise:
-
-```yaml
-backends:
-  - id: hf-serverless
-    type: openai
-    base_url: "https://router.huggingface.co/..."
-    api_key: "${HF_API_KEY}"
-    skip_probe: true
-```
-
-Probe output is always printed regardless of log level. Send `SIGHUP` to reload the entire config, log level, and re-probe all backends — no restart needed:
-
-```bash
-docker kill --signal=HUP llm-proxy
-```
-
-This picks up changes to backends, routes, API keys, and log level. If the new config fails to parse, the old config is kept and an error is logged.
-
-### Log levels
-
-Set `LOG_LEVEL` in the environment (default `0`). `SIGHUP` also reloads this value at runtime.
-
-| Level | What is logged |
-|---|---|
-| `0` | Errors only (default) |
-| `1` | One line per request — method, path, virtual model → real model, backend, status, duration |
-| `2` | Level 1 + incoming request headers + transformation summary (backend, target URL, model rewrite, auth type, merged params) |
-| `3` | Level 2 + first 80 characters of the request body |
-| `4` | Level 3 + full message text content (request and response) |
-
-```yaml
-# docker-compose.yml
-environment:
-  LOG_LEVEL: "1"
-```
-
-Every request is assigned an 8-character hex interaction ID (e.g. `abc12def`) that appears in all log lines and in the `X-Request-ID` response header. This ties request headers, body, and response together for debugging.
-
-### Request journal
-
-The journal emits a structured OTel log record for every proxied request, containing message statistics (character counts, estimated tokens), structural signals (tool use, code fences, multimodal content), and routing metadata. It flows through OpenTelemetry so it's ready for any OTel-compatible backend (Loki, ClickHouse, etc.).
-
-```yaml
-journal:
-  enabled: true
-  otlp_endpoint: ""  # optional — e.g. "http://otel-collector:4318"
-```
-
-When `otlp_endpoint` is empty, journal records are exported to stdout (visible in `docker logs`). When set, records also flow to the configured OTel collector via OTLP/HTTP.
-
-## Metrics reference
-
-| Metric | Type | Labels |
-|---|---|---|
-| `llm_request_duration_seconds` | Histogram | `backend`, `model`, `status` |
-| `llm_time_to_first_token_seconds` | Histogram | `backend`, `model` |
-| `llm_prompt_tokens_total` | Counter | `backend`, `model` |
-| `llm_completion_tokens_total` | Counter | `backend`, `model` |
-| `llm_active_requests` | Gauge | `backend`, `model` |
-| `llm_requests_total` | Counter | `backend`, `model`, `status` |
-| `llm_generation_tokens_per_second` | Gauge | `backend`, `model` |
-| `llm_think_content_ratio` | Histogram | `backend`, `model` |
-| `llm_prompt_tokens_per_request` | Histogram | `backend`, `model` |
-
-## Development
-
-```bash
-go mod tidy
-make test       # runs all tests with race detector
-make build      # produces bin/llm-proxy
-make run        # runs against config.example.yaml
-```
+- **[Configuration](docs/configuration.md)** — backends, routes, virtual models, parameter profiles, TLS, environment variables
+- **[Logging and diagnostics](docs/logging.md)** — log levels, interaction IDs, request journal, startup probes, SIGHUP reload
+- **[Metrics](docs/metrics.md)** — OTel/Prometheus metrics reference
+- **[Development](docs/development.md)** — building, testing, project structure
 
 ## License
 
