@@ -36,7 +36,9 @@ Clients connect to `https://spark-01.your-tailnet.ts.net:4000/v1`.
 
 ## Backends
 
-Each backend is an upstream LLM provider. The proxy supports `openai` and `anthropic` protocol types.
+Each backend is an upstream LLM provider. The `type` determines auth header format and SSE parsing — `openai` for OpenAI-compatible APIs, `anthropic` for Anthropic's Messages API.
+
+**Important:** The proxy does not translate between protocols. A client sending OpenAI format (`/v1/chat/completions`) can only route to an `openai`-type backend. A client sending Anthropic format (`/v1/messages`) can only route to an `anthropic`-type backend. Most clients (OpenWebUI, Continue, Cline, etc.) speak OpenAI format.
 
 ```yaml
 backends:
@@ -53,7 +55,7 @@ backends:
     skip_probe: true              # cloud APIs don't expose /v1/models
 ```
 
-- **`type`** — `openai` or `anthropic`. Determines protocol handling and default auth header format.
+- **`type`** — `openai` or `anthropic`. Determines auth header format, SSE event parsing, and `enable_thinking` translation. Must match the protocol the client speaks.
 - **`base_url`** — scheme + host. Trailing `/v1` is stripped automatically at load time.
 - **`api_key`** — static key or OAuth token. Sent to the backend using the auth header format determined by `auth_type`. If empty, the client's original auth headers pass through to the backend.
 - **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
@@ -69,15 +71,14 @@ The default auth header format matches each provider's convention:
 | `openai` | `bearer` | `Authorization: Bearer <key>` |
 | `anthropic` | `x-api-key` | `x-api-key: <key>` |
 
-Override `auth_type` when the default doesn't match — most commonly when using OAuth tokens with Anthropic, which require Bearer auth:
+Override `auth_type` when the default doesn't match your provider's expectations:
 
 ```yaml
-  - id: anthropic-oauth
-    type: anthropic
-    base_url: "https://api.anthropic.com"
-    api_key: "${ANTHROPIC_OAUTH_TOKEN}"
-    auth_type: bearer
-    skip_probe: true
+  - id: custom-provider
+    type: openai
+    base_url: "https://api.example.com"
+    api_key: "${PROVIDER_KEY}"
+    auth_type: x-api-key           # send key as x-api-key instead of Bearer
 ```
 
 If `api_key` is empty, the proxy does not set any auth headers, and the client's original `Authorization` or `x-api-key` header passes through to the backend unchanged.
@@ -183,13 +184,15 @@ See [Logging](logging.md) for details.
 
 The proxy serves the following endpoints, all using the same reverse-proxy pipeline:
 
-| Endpoint | Protocol | Use |
+| Endpoint | Protocol | Routes to |
 |---|---|---|
-| `/v1/chat/completions` | OpenAI | Chat completions (most clients) |
-| `/v1/completions` | OpenAI | Legacy completions, code completion / FIM |
-| `/v1/messages` | Anthropic | Anthropic Messages API |
+| `/v1/chat/completions` | OpenAI | `openai`-type backends |
+| `/v1/completions` | OpenAI | `openai`-type backends (code completion / FIM) |
+| `/v1/messages` | Anthropic | `anthropic`-type backends |
 | `/v1/models` | OpenAI | Lists virtual models (rewrites upstream response) |
 | `/health` | — | Health check (unauthenticated) |
+
+Each endpoint forwards requests in the client's format — no protocol translation. A request to `/v1/chat/completions` must route to an `openai`-type backend; `/v1/messages` must route to an `anthropic`-type backend.
 
 `/v1/chat/completions` and `/v1/completions` share the same code path — both get streaming support, SSE parsing, metrics, idle timeout, and logging. The only difference is `/v1/completions` forces the backend path to `/v1/completions` (for base models that support fill-in-the-middle).
 
