@@ -12,13 +12,14 @@ Virtualize models from any provider — local or cloud — and switch between th
 ```
 client → llm-proxy:4000/v1 → vLLM (local)
                              → Anthropic (cloud)
+                             → OpenAI (cloud)
                              → HuggingFace (cloud)
                              → any OpenAI-compatible API
 ```
 
 ## What it does
 
-**Unify your backends.** Point your client at one URL. The proxy speaks OpenAI and Anthropic natively — no protocol translation, just direct forwarding with the right auth headers and model names.
+**Unify your backends.** Point your client at one URL. The proxy speaks OpenAI and Anthropic natively — no protocol translation, just direct forwarding with the right auth headers and model names. Supports both `/v1/chat/completions` and `/v1/completions` (for code completion / FIM).
 
 **Virtual models.** Name the same underlying model multiple times with different parameter profiles. A `coder` with low temperature and thinking enabled, a `creative` with high temperature and thinking off — same model, different behaviour. Clients just switch the model name.
 
@@ -75,6 +76,17 @@ backends:
 ```
 
 Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config. Hot-reload with `SIGHUP` — config, log level, and backend probes update without restart.
+
+**Auth types.** By default, `openai` backends use `Authorization: Bearer`, and `anthropic` backends use `x-api-key`. Override with `auth_type: bearer` for OAuth tokens or any backend that needs Bearer auth:
+
+```yaml
+  - id: anthropic-oauth
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    api_key: "${ANTHROPIC_OAUTH_TOKEN}"
+    auth_type: bearer              # OAuth token → Authorization: Bearer
+    skip_probe: true
+```
 
 See the [full configuration reference](docs/configuration.md) for TLS, auto-routing, parameter profiles, and more.
 

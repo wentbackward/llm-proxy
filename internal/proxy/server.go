@@ -238,10 +238,13 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	// ── L2: log transformation summary ─────────────────────────────────────
 	authType := "none"
 	if backend.APIKey != "" {
-		if backend.Type == "anthropic" {
-			authType = "x-api-key"
-		} else {
-			authType = "bearer"
+		authType = backend.AuthType
+		if authType == "" {
+			if backend.Type == "anthropic" {
+				authType = "x-api-key"
+			} else {
+				authType = "bearer"
+			}
 		}
 	}
 	if res != nil && len(res.Params) > 0 {
@@ -327,15 +330,26 @@ func director(target *url.URL, backend *config.Backend, body []byte, protocol, p
 		// receives /v1/chat/completions and forwards it unchanged. base_url
 		// should be scheme+host only (e.g. http://localhost:3022).
 
-		// Auth headers
+		// Auth headers — auth_type overrides the default for the backend type.
+		// Default: "x-api-key" for anthropic, "bearer" for openai.
+		// Explicit "bearer" is needed for OAuth tokens on Anthropic.
 		if backend.APIKey != "" {
-			if backend.Type == "anthropic" {
-				req.Header.Set("x-api-key", backend.APIKey)
-				if req.Header.Get("anthropic-version") == "" {
-					req.Header.Set("anthropic-version", "2023-06-01")
+			authType := backend.AuthType
+			if authType == "" {
+				if backend.Type == "anthropic" {
+					authType = "x-api-key"
+				} else {
+					authType = "bearer"
 				}
+			}
+			if authType == "x-api-key" {
+				req.Header.Set("x-api-key", backend.APIKey)
 			} else {
 				req.Header.Set("Authorization", "Bearer "+backend.APIKey)
+			}
+			// Anthropic always needs a version header
+			if backend.Type == "anthropic" && req.Header.Get("anthropic-version") == "" {
+				req.Header.Set("anthropic-version", "2023-06-01")
 			}
 		}
 

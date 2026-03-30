@@ -20,7 +20,7 @@ make run          # runs against config.example.yaml
 cmd/llm-proxy/          main.go — startup, signal handling, probes
 internal/
   config/               YAML config loader, validation, env expansion
-  proxy/                HTTP handlers, reverse proxy, SSE parser, idle timeout
+  proxy/                HTTP handlers (/v1/chat/completions, /v1/completions, /v1/messages), reverse proxy, SSE parser, idle timeout
   router/               Virtual model resolution, parameter merge, auto-routing
   logger/               Levelled logging (L0–L4), atomic runtime reload
   journal/              OTel log emitter, message analysis
@@ -36,7 +36,7 @@ make test-short       # go test ./... -short
 make lint             # go vet ./...
 ```
 
-Tests cover config loading/validation, routing/parameter merge, SSE parsing (OpenAI + Anthropic), message analysis, and logger level thresholds.
+Tests cover config loading/validation, routing/parameter merge, SSE parsing (OpenAI + Anthropic), completions endpoint (streaming, non-streaming, error handling, no-content-injection), message analysis, and logger level thresholds.
 
 ## Docker
 

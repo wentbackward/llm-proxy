@@ -53,10 +53,34 @@ backends:
     skip_probe: true              # cloud APIs don't expose /v1/models
 ```
 
-- **`type`** — `openai` or `anthropic`. Determines auth header format and protocol handling.
+- **`type`** — `openai` or `anthropic`. Determines protocol handling and default auth header format.
 - **`base_url`** — scheme + host. Trailing `/v1` is stripped automatically at load time.
+- **`api_key`** — static key or OAuth token. Sent to the backend using the auth header format determined by `auth_type`. If empty, the client's original auth headers pass through to the backend.
+- **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
 - **`timeout_seconds`** — idle timeout per request. If no bytes flow for this duration, the request is cancelled. Default: 300.
 - **`skip_probe`** — skip the startup `/v1/models` health check. Set `true` for cloud APIs.
+
+### Authentication
+
+The default auth header format matches each provider's convention:
+
+| Backend type | Default `auth_type` | Header sent |
+|---|---|---|
+| `openai` | `bearer` | `Authorization: Bearer <key>` |
+| `anthropic` | `x-api-key` | `x-api-key: <key>` |
+
+Override `auth_type` when the default doesn't match — most commonly when using OAuth tokens with Anthropic, which require Bearer auth:
+
+```yaml
+  - id: anthropic-oauth
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    api_key: "${ANTHROPIC_OAUTH_TOKEN}"
+    auth_type: bearer
+    skip_probe: true
+```
+
+If `api_key` is empty, the proxy does not set any auth headers, and the client's original `Authorization` or `x-api-key` header passes through to the backend unchanged.
 
 ## Routes
 
@@ -154,6 +178,20 @@ journal:
 ```
 
 See [Logging](logging.md) for details.
+
+## Endpoints
+
+The proxy serves the following endpoints, all using the same reverse-proxy pipeline:
+
+| Endpoint | Protocol | Use |
+|---|---|---|
+| `/v1/chat/completions` | OpenAI | Chat completions (most clients) |
+| `/v1/completions` | OpenAI | Legacy completions, code completion / FIM |
+| `/v1/messages` | Anthropic | Anthropic Messages API |
+| `/v1/models` | OpenAI | Lists virtual models (rewrites upstream response) |
+| `/health` | — | Health check (unauthenticated) |
+
+`/v1/chat/completions` and `/v1/completions` share the same code path — both get streaming support, SSE parsing, metrics, idle timeout, and logging. The only difference is `/v1/completions` forces the backend path to `/v1/completions` (for base models that support fill-in-the-middle).
 
 ## Environment variables
 

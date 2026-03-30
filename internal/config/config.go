@@ -38,9 +38,10 @@ type TelemetryConfig struct {
 
 type Backend struct {
 	ID             string `yaml:"id"`
-	Type           string `yaml:"type"` // openai | anthropic
+	Type           string `yaml:"type"`      // openai | anthropic
 	BaseURL        string `yaml:"base_url"`
 	APIKey         string `yaml:"api_key"`
+	AuthType       string `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 	SkipProbe      bool   `yaml:"skip_probe"` // skip /v1/models health check at startup/SIGHUP
 }
