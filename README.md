@@ -11,7 +11,6 @@ Virtualize models from any provider — local or cloud — and switch between th
 
 ```
 client → llm-proxy:4000/v1 → vLLM (local)
-                             → Anthropic (cloud)
                              → OpenAI (cloud)
                              → HuggingFace (cloud)
                              → any OpenAI-compatible API
@@ -19,7 +18,7 @@ client → llm-proxy:4000/v1 → vLLM (local)
 
 ## What it does
 
-**Unify your backends.** Point your client at one URL. The proxy forwards requests transparently — model resolution, auth headers, and parameter profiles are applied, but the request format is never translated. Clients and backends must speak the same protocol (OpenAI or Anthropic). Supports `/v1/chat/completions`, `/v1/completions` (code completion / FIM), and `/v1/messages` (Anthropic).
+**Unify your backends.** Point your client at one URL. The proxy forwards requests transparently — model resolution, auth headers, and parameter profiles are applied, but the request format is never translated. Supports `/v1/chat/completions` and `/v1/completions` (code completion / FIM).
 
 **Virtual models.** Name the same underlying model multiple times with different parameter profiles. A `coder` with low temperature and thinking enabled, a `creative` with high temperature and thinking off — same model, different behaviour. Clients just switch the model name.
 
@@ -37,7 +36,7 @@ routes:
     defaults: { temperature: 0.9, enable_thinking: false, max_tokens: 8192 }
 ```
 
-**Parameter control.** Three-layer merge: `defaults < caller < clamp`. Set sensible defaults, let callers override what you allow, lock down what they can't. `enable_thinking` is translated per backend — one flag works for vLLM/Qwen and Anthropic.
+**Parameter control.** Three-layer merge: `defaults < caller < clamp`. Set sensible defaults, let callers override what you allow, lock down what they can't.
 
 **Observability.** OpenTelemetry metrics out of the box — TTFT, request duration, token counts, active requests, generation speed. Prometheus exporter, ready for Grafana. Request journal logs structured data about every request for analysis.
 
@@ -62,12 +61,6 @@ backends:
     base_url: "http://gpu-server:8000"
     timeout_seconds: 300
 
-  - id: anthropic
-    type: anthropic
-    base_url: "https://api.anthropic.com"
-    api_key: "${ANTHROPIC_API_KEY}"
-    skip_probe: true
-
   - id: hf
     type: openai
     base_url: "https://router.huggingface.co"
@@ -77,7 +70,7 @@ backends:
 
 Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config. Hot-reload with `SIGHUP` — config, log level, and backend probes update without restart.
 
-**Auth types.** By default, `openai` backends use `Authorization: Bearer` and `anthropic` backends use `x-api-key`. Override with `auth_type` when the default doesn't match your provider. See the [full configuration reference](docs/configuration.md) for details, TLS, auto-routing, and parameter profiles.
+See the [full configuration reference](docs/configuration.md) for details on auth types, TLS, auto-routing, and parameter profiles.
 
 ## Documentation
 
