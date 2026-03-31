@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -216,5 +217,152 @@ backends:
 	b, _ := cfg.Backend("a")
 	if b.TimeoutSeconds != 300 {
 		t.Errorf("default timeout: got %d, want 300", b.TimeoutSeconds)
+	}
+}
+
+func TestPorts_Single(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    ports: 3040
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Backends) != 1 {
+		t.Fatalf("expected 1 backend, got %d", len(cfg.Backends))
+	}
+	b := cfg.Backends[0]
+	if b.ID != "vllm-3040" {
+		t.Errorf("id: got %q, want %q", b.ID, "vllm-3040")
+	}
+	if b.BaseURL != "http://127.0.0.1:3040" {
+		t.Errorf("base_url: got %q, want %q", b.BaseURL, "http://127.0.0.1:3040")
+	}
+}
+
+func TestPorts_List(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    ports: [3040, 3042, 3044]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Backends) != 3 {
+		t.Fatalf("expected 3 backends, got %d", len(cfg.Backends))
+	}
+	want := []struct{ id, url string }{
+		{"vllm-3040", "http://127.0.0.1:3040"},
+		{"vllm-3042", "http://127.0.0.1:3042"},
+		{"vllm-3044", "http://127.0.0.1:3044"},
+	}
+	for i, w := range want {
+		if cfg.Backends[i].ID != w.id {
+			t.Errorf("[%d] id: got %q, want %q", i, cfg.Backends[i].ID, w.id)
+		}
+		if cfg.Backends[i].BaseURL != w.url {
+			t.Errorf("[%d] base_url: got %q, want %q", i, cfg.Backends[i].BaseURL, w.url)
+		}
+	}
+}
+
+func TestPorts_Range(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    ports: "3040-3043"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Backends) != 4 {
+		t.Fatalf("expected 4 backends, got %d", len(cfg.Backends))
+	}
+	for i, port := range []int{3040, 3041, 3042, 3043} {
+		wantID := fmt.Sprintf("vllm-%d", port)
+		if cfg.Backends[i].ID != wantID {
+			t.Errorf("[%d] id: got %q, want %q", i, cfg.Backends[i].ID, wantID)
+		}
+	}
+}
+
+func TestPorts_MissingPlaceholder(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-static
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    ports: 3040
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error when id lacks {port} placeholder")
+	}
+}
+
+func TestPorts_PropertiesPreserved(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    api_key: "secret"
+    timeout_seconds: 120
+    skip_probe: true
+    ports: [3040, 3041]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, b := range cfg.Backends {
+		if b.APIKey != "secret" {
+			t.Errorf("%s: api_key not preserved", b.ID)
+		}
+		if b.TimeoutSeconds != 120 {
+			t.Errorf("%s: timeout_seconds not preserved", b.ID)
+		}
+		if !b.SkipProbe {
+			t.Errorf("%s: skip_probe not preserved", b.ID)
+		}
+		if len(b.Ports) != 0 {
+			t.Errorf("%s: ports should be cleared after expansion", b.ID)
+		}
+	}
+}
+
+func TestPorts_RoutesReferenceExpanded(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    ports: [3040, 3041]
+routes:
+  - virtual_model: model-a
+    backend: vllm-3040
+  - virtual_model: model-b
+    backend: vllm-3041
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := cfg.Backend("vllm-3040"); !ok {
+		t.Error("expanded backend vllm-3040 not found")
+	}
+	if _, ok := cfg.Backend("vllm-3041"); !ok {
+		t.Error("expanded backend vllm-3041 not found")
 	}
 }

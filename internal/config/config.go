@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -36,14 +37,57 @@ type TelemetryConfig struct {
 	Prometheus PrometheusConfig `yaml:"prometheus"`
 }
 
+// PortRange holds one or more port numbers, parsed from YAML as:
+//   - single int:    ports: 3040
+//   - list of ints:  ports: [3040, 3042, 3044]
+//   - range string:  ports: "3040-3045"  (inclusive)
+type PortRange []int
+
+func (p *PortRange) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		// Try as int first
+		if n, err := strconv.Atoi(value.Value); err == nil {
+			*p = PortRange{n}
+			return nil
+		}
+		// Try as range "lo-hi"
+		parts := strings.SplitN(value.Value, "-", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("ports: invalid range %q (expected \"lo-hi\")", value.Value)
+		}
+		lo, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		hi, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err1 != nil || err2 != nil || lo > hi {
+			return fmt.Errorf("ports: invalid range %q", value.Value)
+		}
+		for i := lo; i <= hi; i++ {
+			*p = append(*p, i)
+		}
+		return nil
+	case yaml.SequenceNode:
+		for _, child := range value.Content {
+			n, err := strconv.Atoi(child.Value)
+			if err != nil {
+				return fmt.Errorf("ports: non-integer value %q", child.Value)
+			}
+			*p = append(*p, n)
+		}
+		return nil
+	default:
+		return fmt.Errorf("ports: expected number, list, or range string")
+	}
+}
+
 type Backend struct {
-	ID             string `yaml:"id"`
-	Type           string `yaml:"type"`      // openai | anthropic
-	BaseURL        string `yaml:"base_url"`
-	APIKey         string `yaml:"api_key"`
-	AuthType       string `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
-	SkipProbe      bool   `yaml:"skip_probe"` // skip /v1/models health check at startup/SIGHUP
+	ID             string    `yaml:"id"`
+	Type           string    `yaml:"type"`      // openai | anthropic
+	BaseURL        string    `yaml:"base_url"`
+	APIKey         string    `yaml:"api_key"`
+	AuthType       string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
+	TimeoutSeconds int       `yaml:"timeout_seconds"`
+	SkipProbe      bool      `yaml:"skip_probe"` // skip /v1/models health check at startup/SIGHUP
+	Ports          PortRange `yaml:"ports"`       // expand this backend into one per port; use {port} in id and base_url
 }
 
 type AutoRoute struct {
@@ -93,6 +137,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
+	cfg.Backends, err = expandPorts(cfg.Backends)
+	if err != nil {
+		return nil, err
+	}
+
 	applyDefaults(&cfg)
 
 	if err := validate(&cfg); err != nil {
@@ -123,6 +172,33 @@ func expandEnvVars(s string) string {
 	return envVarRe.ReplaceAllStringFunc(s, func(m string) string {
 		return os.Getenv(m[2 : len(m)-1])
 	})
+}
+
+// expandPorts replaces any backend that has a ports field with one concrete
+// backend per port, substituting {port} in id and base_url.
+func expandPorts(backends []Backend) ([]Backend, error) {
+	var out []Backend
+	for _, b := range backends {
+		if len(b.Ports) == 0 {
+			out = append(out, b)
+			continue
+		}
+		if !strings.Contains(b.ID, "{port}") {
+			return nil, fmt.Errorf("backend %q: id must contain {port} when ports is set", b.ID)
+		}
+		if !strings.Contains(b.BaseURL, "{port}") {
+			return nil, fmt.Errorf("backend %q: base_url must contain {port} when ports is set", b.ID)
+		}
+		for _, port := range b.Ports {
+			ps := strconv.Itoa(port)
+			expanded := b // copy
+			expanded.ID = strings.ReplaceAll(b.ID, "{port}", ps)
+			expanded.BaseURL = strings.ReplaceAll(b.BaseURL, "{port}", ps)
+			expanded.Ports = nil
+			out = append(out, expanded)
+		}
+	}
+	return out, nil
 }
 
 func applyDefaults(cfg *Config) {

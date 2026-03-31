@@ -29,6 +29,14 @@ backends:
     base_url: "http://localhost:3009"
     timeout_seconds: 120
 
+  # Port expansion: generates vllm-worker-4000, vllm-worker-4001, vllm-worker-4002
+  # - id: vllm-worker-{port}
+  #   type: openai
+  #   base_url: "http://127.0.0.1:{port}"
+  #   ports: "4000-4002"            # range (inclusive)
+  #   # also: ports: 4000           # single port
+  #   # also: ports: [4000, 4005]   # explicit list
+
   - id: anthropic
     type: anthropic
     base_url: "https://api.anthropic.com"

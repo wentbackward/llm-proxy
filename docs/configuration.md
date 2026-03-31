@@ -61,6 +61,17 @@ backends:
 - **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
 - **`timeout_seconds`** — idle timeout per request. If no bytes flow for this duration, the request is cancelled. Default: 300.
 - **`skip_probe`** — skip the startup `/v1/models` health check. Set `true` for cloud APIs.
+- **`ports`** — expand a single backend definition into one backend per port. Use `{port}` as a placeholder in `id` and `base_url`. Accepts a single integer, a YAML list, or a `"lo-hi"` range string (inclusive). All other fields are copied to each expanded backend.
+
+```yaml
+  # Generates backends vllm-4000, vllm-4001, vllm-4002
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    ports: "4000-4002"
+    # also: ports: 4000           # single port
+    # also: ports: [4000, 4005]   # explicit list
+```
 
 ### Authentication
 
