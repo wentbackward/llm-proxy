@@ -5,6 +5,10 @@ server:
   tls:
     cert: ""   # path to TLS certificate (e.g. /certs/spark-01.ts.net.crt)
     key:  ""   # path to TLS private key  (e.g. /certs/spark-01.ts.net.key)
+  transport:
+    max_idle_conns: 100          # total idle connections across all backends
+    max_idle_conns_per_host: 20  # idle connections kept per backend
+    idle_conn_timeout: 120       # seconds before idle connections are closed
 
 telemetry:
   prometheus:
@@ -49,6 +53,7 @@ backends:
     base_url: "https://api.openai.com"
     api_key: "${OPENAI_API_KEY}"
     timeout_seconds: 300
+    max_concurrency: 5   # optional: limit in-flight requests to this backend (0 = unlimited)
     skip_probe: true
 
 # Virtual model aliases with optional param profiles

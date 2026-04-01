@@ -12,7 +12,15 @@ server:
   tls:
     cert: ""                     # path to TLS certificate
     key:  ""                     # path to TLS private key
+  transport:
+    max_idle_conns: 100          # total idle connections across all backends (default: 100)
+    max_idle_conns_per_host: 20  # idle connections per backend (default: 20)
+    idle_conn_timeout: 120       # seconds before idle connections are closed (default: 120)
 ```
+
+- **`transport.max_idle_conns`** — total number of idle (keep-alive) connections across all backends. Default: 100.
+- **`transport.max_idle_conns_per_host`** — idle connections retained per backend host. Increase this if you have few backends with high concurrency. Default: 20.
+- **`transport.idle_conn_timeout`** — seconds an idle connection sits unused before being closed. Default: 120.
 
 ### TLS with Tailscale
 
@@ -60,6 +68,7 @@ backends:
 - **`api_key`** — static key or OAuth token. Sent to the backend using the auth header format determined by `auth_type`. If empty, the client's original auth headers pass through to the backend.
 - **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
 - **`timeout_seconds`** — idle timeout per request. If no bytes flow for this duration, the request is cancelled. Default: 300.
+- **`max_concurrency`** — maximum number of in-flight requests to this backend. When the limit is reached, new requests queue until a slot opens or the client disconnects. `0` (default) means unlimited.
 - **`skip_probe`** — skip the startup `/v1/models` health check. Set `true` for cloud APIs.
 - **`ports`** — expand a single backend definition into one backend per port. Use `{port}` as a placeholder in `id` and `base_url`. Accepts a single integer, a YAML list, or a `"lo-hi"` range string (inclusive). All other fields are copied to each expanded backend.
 

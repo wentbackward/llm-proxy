@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,12 +39,29 @@ type Server struct {
 	rtr     atomic.Pointer[router.Router]
 	metrics *telemetry.Metrics
 	journal *journal.Journal // nil if journal disabled
+
+	transport  *http.Transport        // shared connection pool for all backends
+	mu         sync.RWMutex           // guards semaphores
+	semaphores map[string]chan struct{} // per-backend concurrency limiter (nil entry = unlimited)
 }
 
 func New(cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
-	s := &Server{metrics: metrics, journal: j}
+	tc := cfg.Server.Transport
+	s := &Server{
+		metrics: metrics,
+		journal: j,
+		transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			MaxIdleConns:        tc.MaxIdleConns,
+			MaxIdleConnsPerHost: tc.MaxIdleConnsPerHost,
+			MaxConnsPerHost:     0, // unlimited active — semaphore handles backpressure
+			IdleConnTimeout:     time.Duration(tc.IdleConnTimeout) * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
 	s.cfg.Store(cfg)
 	s.rtr.Store(router.New(cfg))
+	s.buildSemaphores(cfg)
 	return s
 }
 
@@ -51,7 +70,41 @@ func New(cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Se
 func (s *Server) Reload(cfg *config.Config) {
 	s.rtr.Store(router.New(cfg))
 	s.cfg.Store(cfg)
+	s.buildSemaphores(cfg)
 	log.Printf("[proxy] config reloaded: %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
+}
+
+// buildSemaphores creates a fresh semaphore map from the config.
+// Backends without max_concurrency get no entry (unlimited).
+func (s *Server) buildSemaphores(cfg *config.Config) {
+	sems := make(map[string]chan struct{}, len(cfg.Backends))
+	for _, b := range cfg.Backends {
+		if b.MaxConcurrency > 0 {
+			sems[b.ID] = make(chan struct{}, b.MaxConcurrency)
+		}
+	}
+	s.mu.Lock()
+	s.semaphores = sems
+	s.mu.Unlock()
+}
+
+// acquireSemaphore blocks until a slot is available for the given backend,
+// or the request context is cancelled. Returns a release function and true,
+// or nil and false if the context was cancelled while waiting.
+func (s *Server) acquireSemaphore(ctx context.Context, backendID string) (release func(), ok bool) {
+	s.mu.RLock()
+	sem := s.semaphores[backendID]
+	s.mu.RUnlock()
+
+	if sem == nil {
+		return func() {}, true
+	}
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, true
+	case <-ctx.Done():
+		return nil, false
+	}
 }
 
 // Config returns the current config (for use by main.go probes etc.)
@@ -297,8 +350,18 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	w.Header().Set("X-Request-ID", rid)
 	s.metrics.ActiveRequests.Add(metricsCtx, 1, telemetry.BackendAttrs(backendID, realModel))
 
+	// ── Per-backend concurrency guard ─────────────────────────────────────
+	release, ok := s.acquireSemaphore(r.Context(), backendID)
+	if !ok {
+		s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
+		jsonError(w, "backend concurrency limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
+
 	rp := &httputil.ReverseProxy{
-		Director: director(targetURL, backend, newBody, protocol, opts.pathOverride),
+		Transport: s.transport,
+		Director:  director(targetURL, backend, newBody, protocol, opts.pathOverride),
 		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))

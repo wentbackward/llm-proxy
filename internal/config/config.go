@@ -20,11 +20,18 @@ type TLSConfig struct {
 	Key  string `yaml:"key"`  // path to private key file
 }
 
+type TransportConfig struct {
+	MaxIdleConns        int `yaml:"max_idle_conns"`         // total idle connections across all backends (default: 100)
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"` // idle connections per backend (default: 20)
+	IdleConnTimeout     int `yaml:"idle_conn_timeout"`       // seconds before idle connections are closed (default: 120)
+}
+
 type ServerConfig struct {
-	Host   string    `yaml:"host"`
-	Port   int       `yaml:"port"`
-	APIKey string    `yaml:"api_key"` // required bearer token for inbound requests
-	TLS    TLSConfig `yaml:"tls"`
+	Host      string          `yaml:"host"`
+	Port      int             `yaml:"port"`
+	APIKey    string          `yaml:"api_key"` // required bearer token for inbound requests
+	TLS       TLSConfig       `yaml:"tls"`
+	Transport TransportConfig `yaml:"transport"`
 }
 
 type PrometheusConfig struct {
@@ -86,8 +93,9 @@ type Backend struct {
 	APIKey         string    `yaml:"api_key"`
 	AuthType       string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
 	TimeoutSeconds int       `yaml:"timeout_seconds"`
-	SkipProbe      bool      `yaml:"skip_probe"` // skip /v1/models health check at startup/SIGHUP
-	Ports          PortRange `yaml:"ports"`       // expand this backend into one per port; use {port} in id and base_url
+	MaxConcurrency int       `yaml:"max_concurrency"` // 0 = unlimited; limits in-flight requests to this backend
+	SkipProbe      bool      `yaml:"skip_probe"`      // skip /v1/models health check at startup/SIGHUP
+	Ports          PortRange `yaml:"ports"`            // expand this backend into one per port; use {port} in id and base_url
 }
 
 type AutoRoute struct {
@@ -207,6 +215,15 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 4000
+	}
+	if cfg.Server.Transport.MaxIdleConns == 0 {
+		cfg.Server.Transport.MaxIdleConns = 100
+	}
+	if cfg.Server.Transport.MaxIdleConnsPerHost == 0 {
+		cfg.Server.Transport.MaxIdleConnsPerHost = 20
+	}
+	if cfg.Server.Transport.IdleConnTimeout == 0 {
+		cfg.Server.Transport.IdleConnTimeout = 120
 	}
 	if cfg.Telemetry.Prometheus.Port == 0 {
 		cfg.Telemetry.Prometheus.Port = 9091

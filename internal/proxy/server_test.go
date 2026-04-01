@@ -2,13 +2,17 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wentbackward/llm-proxy/internal/config"
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
@@ -490,5 +494,167 @@ func TestCompletions_NoContentInjection(t *testing.T) {
 		default:
 			t.Errorf("unexpected key in forwarded body: %q", key)
 		}
+	}
+}
+
+// ── Transport reuse tests ────────────────────────────────────────────────────
+
+func TestSharedTransport(t *testing.T) {
+	// Verify the server's transport is set and used by the reverse proxy.
+	// We check indirectly: two requests to the same backend should not panic
+	// and should both succeed — confirming the shared transport works.
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	for i := 0; i < 3; i++ {
+		body, _ := json.Marshal(map[string]interface{}{
+			"model":  "test-model",
+			"prompt": "test",
+		})
+		req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.handleCompletions(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: got status %d, want 200", i, rec.Code)
+		}
+	}
+
+	if s.transport == nil {
+		t.Error("server should have a shared transport")
+	}
+}
+
+// ── Semaphore tests ──────────────────────────────────────────────────────────
+
+func TestSemaphore_LimitsConcurrency(t *testing.T) {
+	// Backend that holds requests until we signal them to complete.
+	gate := make(chan struct{})
+	var inflight atomic.Int32
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inflight.Add(1)
+		<-gate
+		inflight.Add(-1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "cmpl-test", "object": "text_completion", "model": "test-model",
+			"choices": []interface{}{map[string]interface{}{"index": 0, "text": "ok", "finish_reason": "stop"}},
+		})
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Backends: []config.Backend{
+			{ID: "limited", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30, MaxConcurrency: 2},
+		},
+		Routes: []config.Route{
+			{VirtualModel: "test-model", Backend: "limited", RealModel: "test-model"},
+		},
+	}
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg, metrics, nil)
+
+	makeReq := func() (*httptest.ResponseRecorder, *http.Request) {
+		body, _ := json.Marshal(map[string]interface{}{"model": "test-model", "prompt": "test"})
+		req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		return httptest.NewRecorder(), req
+	}
+
+	// Launch 4 requests concurrently with max_concurrency=2
+	var wg sync.WaitGroup
+	recorders := make([]*httptest.ResponseRecorder, 4)
+	for i := 0; i < 4; i++ {
+		rec, req := makeReq()
+		recorders[i] = rec
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.handleCompletions(rec, req)
+		}()
+	}
+
+	// Wait for 2 to be in-flight (the semaphore limit)
+	deadline := time.After(2 * time.Second)
+	for {
+		if inflight.Load() >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for 2 in-flight requests, got %d", inflight.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Give a moment for any extra requests to sneak through (they shouldn't)
+	time.Sleep(50 * time.Millisecond)
+	if n := inflight.Load(); n > 2 {
+		t.Errorf("in-flight should be capped at 2, got %d", n)
+	}
+
+	// Release all and let everything finish
+	close(gate)
+	wg.Wait()
+}
+
+func TestSemaphore_ContextCancellation(t *testing.T) {
+	s := &Server{}
+	s.semaphores = map[string]chan struct{}{
+		"full": make(chan struct{}, 1),
+	}
+	// Fill the semaphore
+	s.semaphores["full"] <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	_, ok := s.acquireSemaphore(ctx, "full")
+	if ok {
+		t.Error("acquireSemaphore should fail when context is cancelled")
+	}
+}
+
+func TestSemaphore_UnlimitedBackend(t *testing.T) {
+	s := &Server{}
+	s.semaphores = map[string]chan struct{}{}
+
+	release, ok := s.acquireSemaphore(context.Background(), "no-limit")
+	if !ok {
+		t.Error("acquireSemaphore should succeed for backends without max_concurrency")
+	}
+	release() // should not panic
+}
+
+func TestSemaphore_ReloadUpdatesSemaphores(t *testing.T) {
+	cfg1 := &config.Config{
+		Backends: []config.Backend{
+			{ID: "b1", Type: "openai", BaseURL: "http://localhost", TimeoutSeconds: 30, MaxConcurrency: 5},
+		},
+	}
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg1, metrics, nil)
+
+	s.mu.RLock()
+	sem := s.semaphores["b1"]
+	s.mu.RUnlock()
+	if cap(sem) != 5 {
+		t.Errorf("initial semaphore cap: got %d, want 5", cap(sem))
+	}
+
+	cfg2 := &config.Config{
+		Backends: []config.Backend{
+			{ID: "b1", Type: "openai", BaseURL: "http://localhost", TimeoutSeconds: 30, MaxConcurrency: 10},
+		},
+	}
+	s.Reload(cfg2)
+
+	s.mu.RLock()
+	sem = s.semaphores["b1"]
+	s.mu.RUnlock()
+	if cap(sem) != 10 {
+		t.Errorf("reloaded semaphore cap: got %d, want 10", cap(sem))
 	}
 }
