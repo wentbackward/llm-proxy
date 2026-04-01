@@ -289,6 +289,8 @@ type idleTimeoutBody struct {
 	timer   *time.Timer
 	ch      chan readResult
 	done    chan struct{}
+	pending []byte // leftover bytes from a readResult that didn't fit in p
+	pendErr error  // error accompanying the pending bytes
 }
 
 type readResult struct {
@@ -325,12 +327,29 @@ func (b *idleTimeoutBody) readLoop() {
 }
 
 func (b *idleTimeoutBody) Read(p []byte) (int, error) {
+	// Drain leftover bytes from a previous read that didn't fit in p.
+	if len(b.pending) > 0 {
+		n := copy(p, b.pending)
+		b.pending = b.pending[n:]
+		if len(b.pending) == 0 {
+			err := b.pendErr
+			b.pendErr = nil
+			return n, err
+		}
+		return n, nil // more pending data remains, don't return error yet
+	}
+
 	select {
 	case r := <-b.ch:
 		if len(r.buf) > 0 {
 			b.timer.Reset(b.timeout)
 		}
 		n := copy(p, r.buf)
+		if n < len(r.buf) {
+			b.pending = r.buf[n:]
+			b.pendErr = r.err
+			return n, nil // more data buffered, don't return error yet
+		}
 		return n, r.err
 	case <-b.timer.C:
 		// Close underlying reader to unblock readLoop goroutine
