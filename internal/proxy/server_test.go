@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,21 @@ func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.S
 
 		isStreaming, _ := body["stream"].(bool)
 
-		if r.URL.Path == "/v1/completions" {
+		if r.URL.Path == "/v1/embeddings" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"object": "list",
+				"model":  body["model"],
+				"data": []interface{}{
+					map[string]interface{}{
+						"object":    "embedding",
+						"index":     0,
+						"embedding": []float64{0.1, 0.2, 0.3},
+					},
+				},
+				"usage": map[string]interface{}{"prompt_tokens": 5, "total_tokens": 5},
+			})
+		} else if r.URL.Path == "/v1/completions" {
 			if isStreaming {
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.Header().Set("Cache-Control", "no-cache")
@@ -656,5 +671,186 @@ func TestSemaphore_ReloadUpdatesSemaphores(t *testing.T) {
 	s.mu.RUnlock()
 	if cap(sem) != 10 {
 		t.Errorf("reloaded semaphore cap: got %d, want 10", cap(sem))
+	}
+}
+
+func TestReload_NewRoutesResolve(t *testing.T) {
+	var captured capturedRequest
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]interface{}
+		json.Unmarshal(raw, &body)
+		captured.Path = r.URL.Path
+		captured.Body = body
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "chatcmpl-test", "object": "chat.completion", "model": body["model"],
+			"choices": []interface{}{map[string]interface{}{
+				"index": 0, "finish_reason": "stop",
+				"message": map[string]interface{}{"role": "assistant", "content": "ok"},
+			}},
+		})
+	}))
+	defer backend.Close()
+
+	// Start with one route
+	cfg1, err := config.Load(writeTestConfig(t, fmt.Sprintf(`
+backends:
+  - id: b1
+    type: openai
+    base_url: %q
+routes:
+  - virtual_model: model-a
+    backend: b1
+    real_model: real-a
+`, backend.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg1, metrics, nil)
+
+	// model-a should work
+	sendChat(t, s, "model-a", http.StatusOK)
+	if m, _ := captured.Body["model"].(string); m != "real-a" {
+		t.Errorf("before reload: model got %q, want %q", m, "real-a")
+	}
+
+	// model-b should fall through (no route)
+	sendChat(t, s, "model-b", http.StatusOK) // falls through to first backend
+	if m, _ := captured.Body["model"].(string); m != "model-b" {
+		t.Errorf("before reload: unrouted model should pass through as %q, got %q", "model-b", m)
+	}
+
+	// Reload with model-b added
+	cfg2, err := config.Load(writeTestConfig(t, fmt.Sprintf(`
+backends:
+  - id: b1
+    type: openai
+    base_url: %q
+routes:
+  - virtual_model: model-a
+    backend: b1
+    real_model: real-a
+  - virtual_model: model-b
+    backend: b1
+    real_model: real-b
+`, backend.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Reload(cfg2)
+
+	// model-b should now resolve to real-b
+	sendChat(t, s, "model-b", http.StatusOK)
+	if m, _ := captured.Body["model"].(string); m != "real-b" {
+		t.Errorf("after reload: model got %q, want %q", m, "real-b")
+	}
+}
+
+func writeTestConfig(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "config-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(content)
+	f.Close()
+	return f.Name()
+}
+
+// ── /v1/embeddings tests ─────────────────────────────────────────────────────
+
+func TestEmbeddings_ForwardsToEmbeddingsEndpoint(t *testing.T) {
+	var captured capturedRequest
+	s, backend := newTestServer(t, &captured)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": "test-model",
+		"input": "hello world",
+	})
+	req := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleEmbeddings(rec, req)
+
+	if captured.Path != "/v1/embeddings" {
+		t.Errorf("should forward to /v1/embeddings, got %q", captured.Path)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+}
+
+func TestEmbeddings_InputPassedThrough(t *testing.T) {
+	var captured capturedRequest
+	s, backend := newTestServer(t, &captured)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": "test-model",
+		"input": []string{"hello", "world"},
+	})
+	req := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleEmbeddings(rec, req)
+
+	input, ok := captured.Body["input"].([]interface{})
+	if !ok || len(input) != 2 {
+		t.Errorf("input should pass through as array, got %v", captured.Body["input"])
+	}
+}
+
+func TestEmbeddings_MethodNotAllowed(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	req := httptest.NewRequest("GET", "/v1/embeddings", nil)
+	rec := httptest.NewRecorder()
+	s.handleEmbeddings(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET should return 405, got %d", rec.Code)
+	}
+}
+
+func TestEmbeddings_ResponsePassedThrough(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": "test-model",
+		"input": "test",
+	})
+	req := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleEmbeddings(rec, req)
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["object"] != "list" {
+		t.Errorf("object: got %q, want %q", resp["object"], "list")
+	}
+	data, ok := resp["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		t.Fatal("response should have data")
+	}
+}
+
+func sendChat(t *testing.T, s *Server, model string, wantStatus int) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    model,
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, req)
+	if rec.Code != wantStatus {
+		t.Errorf("model %q: got status %d, want %d; body: %s", model, rec.Code, wantStatus, rec.Body.String())
 	}
 }

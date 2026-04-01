@@ -71,7 +71,21 @@ func (s *Server) Reload(cfg *config.Config) {
 	s.rtr.Store(router.New(cfg))
 	s.cfg.Store(cfg)
 	s.buildSemaphores(cfg)
-	log.Printf("[proxy] config reloaded: %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
+	log.Printf("[reload] %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
+	for _, b := range cfg.Backends {
+		conc := "unlimited"
+		if b.MaxConcurrency > 0 {
+			conc = fmt.Sprintf("max=%d", b.MaxConcurrency)
+		}
+		log.Printf("[reload]   backend %-16s %s (%s)", b.ID, b.BaseURL, conc)
+	}
+	for _, r := range cfg.Routes {
+		if r.AutoRoute != nil {
+			log.Printf("[reload]   route   %-16s → auto(text=%s, vision=%s)", r.VirtualModel, r.AutoRoute.Text, r.AutoRoute.Vision)
+		} else {
+			log.Printf("[reload]   route   %-16s → %s / %s", r.VirtualModel, r.Backend, r.RealModel)
+		}
+	}
 }
 
 // buildSemaphores creates a fresh semaphore map from the config.
@@ -125,6 +139,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/models", auth(s.handleModels))
 	mux.HandleFunc("/v1/chat/completions", auth(s.handleProxy))
 	mux.HandleFunc("/v1/completions", auth(s.handleCompletions))
+	mux.HandleFunc("/v1/embeddings", auth(s.handleEmbeddings))
 	mux.HandleFunc("/v1/messages", auth(s.handleProxy))
 }
 
@@ -738,6 +753,18 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	s.proxyRequest(w, r, proxyOpts{
 		pathOverride: "/v1/completions",
+		protocol:     "openai",
+	})
+}
+
+// handleEmbeddings forwards /v1/embeddings requests to the backend.
+func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.proxyRequest(w, r, proxyOpts{
+		pathOverride: "/v1/embeddings",
 		protocol:     "openai",
 	})
 }
