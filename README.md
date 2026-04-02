@@ -18,7 +18,7 @@ client → llm-proxy:4000/v1 → vLLM (local)
 
 ## What it does
 
-**Unify your backends.** Point your client at one URL. The proxy forwards requests transparently — model resolution, auth headers, and parameter profiles are applied, but the request format is never translated. Supports `/v1/chat/completions` and `/v1/completions` (code completion / FIM).
+**Unify your backends.** Point your client at one URL. The proxy forwards requests transparently — model resolution, auth headers, and parameter profiles are applied, but the request format is never translated. Supports `/v1/chat/completions`, `/v1/completions` (code completion / FIM), and `/v1/embeddings`.
 
 **Virtual models.** Name the same underlying model multiple times with different parameter profiles. A `coder` with low temperature and thinking enabled, a `creative` with high temperature and thinking off — same model, different behaviour. Clients just switch the model name.
 

@@ -210,13 +210,14 @@ The proxy serves the following endpoints, all using the same reverse-proxy pipel
 |---|---|---|
 | `/v1/chat/completions` | OpenAI | `openai`-type backends |
 | `/v1/completions` | OpenAI | `openai`-type backends (code completion / FIM) |
+| `/v1/embeddings` | OpenAI | `openai`-type backends (embedding models) |
 | `/v1/messages` | Anthropic | `anthropic`-type backends |
 | `/v1/models` | OpenAI | Lists virtual models (rewrites upstream response) |
 | `/health` | — | Health check (unauthenticated) |
 
 Each endpoint forwards requests in the client's format — no protocol translation. A request to `/v1/chat/completions` must route to an `openai`-type backend; `/v1/messages` must route to an `anthropic`-type backend.
 
-`/v1/chat/completions` and `/v1/completions` share the same code path — both get streaming support, SSE parsing, metrics, idle timeout, and logging. The only difference is `/v1/completions` forces the backend path to `/v1/completions` (for base models that support fill-in-the-middle).
+`/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings` share the same reverse-proxy pipeline — all get metrics, idle timeout, and logging. `/v1/completions` and `/v1/embeddings` force their respective backend paths.
 
 ## Environment variables
 
