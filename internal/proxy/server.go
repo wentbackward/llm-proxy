@@ -278,7 +278,14 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	res, err := rtr.Resolve(modelName, body)
 	if err != nil {
-		// No route configured — pass through to first backend if available.
+		if !cfg.Server.PassthroughUnrouted {
+			available := cfg.VirtualModels()
+			log.Printf("[proxy] rejected unknown model %q (from=%s ua=%s)",
+				modelName, r.RemoteAddr, r.UserAgent())
+			jsonError(w, fmt.Sprintf("unknown model %q — available models: %v", modelName, available), http.StatusNotFound)
+			return
+		}
+		// Passthrough mode — forward to first backend.
 		if len(cfg.Backends) == 0 {
 			jsonError(w, "no backends configured", http.StatusServiceUnavailable)
 			return
@@ -286,7 +293,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 		b := &cfg.Backends[0]
 		backend = b
 		realModel = modelName
-		log.Printf("[proxy] no route for %q, passing through to %s", modelName, b.ID)
+		log.Printf("[proxy] no route for %q, passing through to %s (from=%s ua=%s)",
+			modelName, b.ID, r.RemoteAddr, r.UserAgent())
 	} else {
 		backend = res.Backend
 		realModel = res.RealModel

@@ -9,6 +9,7 @@ server:
   host: "0.0.0.0"
   port: 4000
   api_key: "${PROXY_API_KEY}"   # clients must send: Authorization: Bearer <key>
+  passthrough_unrouted: false    # reject unknown models with 404 (default)
   tls:
     cert: ""                     # path to TLS certificate
     key:  ""                     # path to TLS private key
@@ -18,6 +19,7 @@ server:
     idle_conn_timeout: 120       # seconds before idle connections are closed (default: 120)
 ```
 
+- **`passthrough_unrouted`** — when `false` (default), requests for unknown model names are rejected with a 404 that lists available virtual models. When `true`, unknown models are forwarded to the first configured backend as-is.
 - **`transport.max_idle_conns`** — total number of idle (keep-alive) connections across all backends. Default: 100.
 - **`transport.max_idle_conns_per_host`** — idle connections retained per backend host. Increase this if you have few backends with high concurrency. Default: 20.
 - **`transport.idle_conn_timeout`** — seconds an idle connection sits unused before being closed. Default: 120.

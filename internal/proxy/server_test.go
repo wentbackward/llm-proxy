@@ -111,6 +111,7 @@ func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.S
 	}))
 
 	cfg := &config.Config{
+		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
 			{ID: "test", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30},
 		},
@@ -394,6 +395,7 @@ func TestCompletions_BackendError(t *testing.T) {
 	defer backend.Close()
 
 	cfg := &config.Config{
+		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
 			{ID: "test", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30},
 		},
@@ -422,6 +424,7 @@ func TestCompletions_BackendError(t *testing.T) {
 
 func TestCompletions_BackendUnreachable(t *testing.T) {
 	cfg := &config.Config{
+		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
 			{ID: "test", Type: "openai", BaseURL: "http://127.0.0.1:1", TimeoutSeconds: 2},
 		},
@@ -560,6 +563,7 @@ func TestSemaphore_LimitsConcurrency(t *testing.T) {
 	defer backend.Close()
 
 	cfg := &config.Config{
+		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
 			{ID: "limited", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30, MaxConcurrency: 2},
 		},
@@ -716,11 +720,8 @@ routes:
 		t.Errorf("before reload: model got %q, want %q", m, "real-a")
 	}
 
-	// model-b should fall through (no route)
-	sendChat(t, s, "model-b", http.StatusOK) // falls through to first backend
-	if m, _ := captured.Body["model"].(string); m != "model-b" {
-		t.Errorf("before reload: unrouted model should pass through as %q, got %q", "model-b", m)
-	}
+	// model-b should be rejected (no route, passthrough disabled by default)
+	sendChat(t, s, "model-b", http.StatusNotFound)
 
 	// Reload with model-b added
 	cfg2, err := config.Load(writeTestConfig(t, fmt.Sprintf(`
@@ -837,6 +838,110 @@ func TestEmbeddings_ResponsePassedThrough(t *testing.T) {
 	data, ok := resp["data"].([]interface{})
 	if !ok || len(data) == 0 {
 		t.Fatal("response should have data")
+	}
+}
+
+// ── Unknown model rejection tests ────────────────────────────────────────────
+
+func TestUnknownModel_RejectedByDefault(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("backend should not be called for unknown model")
+	}))
+	defer backend.Close()
+
+	cfg, err := config.Load(writeTestConfig(t, fmt.Sprintf(`
+backends:
+  - id: b1
+    type: openai
+    base_url: %q
+routes:
+  - virtual_model: my-model
+    backend: b1
+    real_model: real-model
+`, backend.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg, metrics, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "nonexistent",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown model should return 404, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	errObj, _ := resp["error"].(map[string]interface{})
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "nonexistent") {
+		t.Errorf("error should mention the unknown model name, got: %s", msg)
+	}
+	if !strings.Contains(msg, "my-model") {
+		t.Errorf("error should list available models, got: %s", msg)
+	}
+}
+
+func TestUnknownModel_PassthroughWhenEnabled(t *testing.T) {
+	var captured capturedRequest
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]interface{}
+		json.Unmarshal(raw, &body)
+		captured.Body = body
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "chatcmpl-test", "object": "chat.completion",
+			"choices": []interface{}{map[string]interface{}{
+				"index": 0, "finish_reason": "stop",
+				"message": map[string]interface{}{"role": "assistant", "content": "ok"},
+			}},
+		})
+	}))
+	defer backend.Close()
+
+	cfg, err := config.Load(writeTestConfig(t, fmt.Sprintf(`
+server:
+  passthrough_unrouted: true
+backends:
+  - id: b1
+    type: openai
+    base_url: %q
+routes:
+  - virtual_model: my-model
+    backend: b1
+    real_model: real-model
+`, backend.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metrics, _, _ := telemetry.Init()
+	s := New(cfg, metrics, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "raw-upstream-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("passthrough should return 200, got %d", rec.Code)
+	}
+	if m, _ := captured.Body["model"].(string); m != "raw-upstream-model" {
+		t.Errorf("model should pass through as-is, got %q", m)
 	}
 }
 

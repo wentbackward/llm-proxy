@@ -27,11 +27,12 @@ type TransportConfig struct {
 }
 
 type ServerConfig struct {
-	Host      string          `yaml:"host"`
-	Port      int             `yaml:"port"`
-	APIKey    string          `yaml:"api_key"` // required bearer token for inbound requests
-	TLS       TLSConfig       `yaml:"tls"`
-	Transport TransportConfig `yaml:"transport"`
+	Host                 string          `yaml:"host"`
+	Port                 int             `yaml:"port"`
+	APIKey               string          `yaml:"api_key"`               // required bearer token for inbound requests
+	PassthroughUnrouted  bool            `yaml:"passthrough_unrouted"`  // false = reject unknown models; true = forward to first backend
+	TLS                  TLSConfig       `yaml:"tls"`
+	Transport            TransportConfig `yaml:"transport"`
 }
 
 type PrometheusConfig struct {
@@ -301,4 +302,13 @@ func (c *Config) Backend(id string) (*Backend, bool) {
 func (c *Config) Route(model string) (*Route, bool) {
 	r, ok := c.routeByModel[model]
 	return r, ok
+}
+
+// VirtualModels returns all configured virtual model names.
+func (c *Config) VirtualModels() []string {
+	names := make([]string, 0, len(c.Routes))
+	for _, r := range c.Routes {
+		names = append(names, r.VirtualModel)
+	}
+	return names
 }
