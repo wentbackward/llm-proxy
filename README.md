@@ -40,6 +40,8 @@ routes:
 
 **Observability.** OpenTelemetry metrics out of the box — TTFT, request duration, token counts, active requests, generation speed. Prometheus exporter, ready for Grafana. Request journal logs structured data about every request for analysis.
 
+**On-demand full-body capture.** When metrics aren't enough and you need the exact bytes going upstream (prompt-cache debugging, context-size investigations), `SIGUSR1` arms a bounded capture window that dumps the next N full request/response bodies to disk. Off by default.
+
 **Zero overhead.** SSE streams flow directly to the client. Metrics are parsed from the byte stream without buffering. Single static Go binary, ~7 MB Docker image on `scratch`.
 
 ## Quick start
@@ -71,6 +73,28 @@ backends:
 Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config. Hot-reload with `SIGHUP` — config, log level, and backend probes update without restart.
 
 See the [full configuration reference](docs/configuration.md) for details on auth types, TLS, auto-routing, and parameter profiles.
+
+## Capturing full request bodies for debugging
+
+The metrics pipeline records sizes and previews — fine for observability, not enough when you need to diff two requests byte-for-byte or inspect a tool array. For that, add to `config.yaml`:
+
+```yaml
+sig_message_capture:
+  enabled: true
+  output_folder: /capture    # auto-created with mode 0700 at startup
+  max_messages: 5
+```
+
+`SIGHUP` to pick up the config, then when you want to dump:
+
+```bash
+docker kill --signal=USR1 llm-proxy
+# ...make up to 5 requests...
+docker cp llm-proxy:/capture/. ./local-captures/
+jq . ./local-captures/*.json
+```
+
+The container-local path is ephemeral — files live in the container's writable layer and are discarded on rebuild/recreate, which suits ad-hoc debugging. If you want persistence across rebuilds, bind-mount or use a named volume; see [logging.md](docs/logging.md#full-body-message-capture-sigusr1) for the full reference (file format, security notes, streaming behaviour).
 
 ## Documentation
 
