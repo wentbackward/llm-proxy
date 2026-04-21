@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/wentbackward/llm-proxy/internal/capture"
 	"github.com/wentbackward/llm-proxy/internal/config"
 	"github.com/wentbackward/llm-proxy/internal/journal"
 	"github.com/wentbackward/llm-proxy/internal/logger"
@@ -38,7 +39,8 @@ type Server struct {
 	cfg     atomic.Pointer[config.Config]
 	rtr     atomic.Pointer[router.Router]
 	metrics *telemetry.Metrics
-	journal *journal.Journal // nil if journal disabled
+	journal *journal.Journal                // nil if journal disabled
+	capture atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
 
 	transport  *http.Transport        // shared connection pool for all backends
 	mu         sync.RWMutex           // guards semaphores
@@ -62,7 +64,34 @@ func New(cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Se
 	s.cfg.Store(cfg)
 	s.rtr.Store(router.New(cfg))
 	s.buildSemaphores(cfg)
+	s.applyCaptureConfig(cfg)
 	return s
+}
+
+// applyCaptureConfig builds (or rebuilds) the capture handle from cfg. An init
+// failure disables capture rather than failing the whole server — this is a
+// debug-only feature and should never take the proxy down.
+func (s *Server) applyCaptureConfig(cfg *config.Config) {
+	c, err := capture.New(capture.Config{
+		Enabled:      cfg.SigMessageCapture.Enabled,
+		OutputFolder: cfg.SigMessageCapture.OutputFolder,
+		MaxMessages:  cfg.SigMessageCapture.MaxMessages,
+	})
+	if err != nil {
+		log.Printf("[capture] init failed: %v (disabling)", err)
+		c = nil
+	}
+	s.capture.Store(c)
+	if c != nil {
+		log.Printf("[capture] enabled: folder=%s max_messages=%d (send SIGUSR1 to arm)",
+			c.OutputFolder(), c.MaxMessages())
+	}
+}
+
+// Capture returns the current capture handle (may be nil if disabled).
+// Used by the SIGUSR1 handler in main.
+func (s *Server) Capture() *capture.Capture {
+	return s.capture.Load()
 }
 
 // Reload atomically swaps in a new config and router.
@@ -71,6 +100,7 @@ func (s *Server) Reload(cfg *config.Config) {
 	s.rtr.Store(router.New(cfg))
 	s.cfg.Store(cfg)
 	s.buildSemaphores(cfg)
+	s.applyCaptureConfig(cfg)
 	log.Printf("[reload] %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
 	for _, b := range cfg.Backends {
 		conc := "unlimited"
@@ -373,10 +403,16 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	w.Header().Set("X-Request-ID", rid)
 	s.metrics.ActiveRequests.Add(metricsCtx, 1, telemetry.BackendAttrs(backendID, realModel))
 
+	// ── Capture: reserve a slot if the SIGUSR1 window is open ─────────────
+	// Reserved here (after successful validation) so that 400/404/500
+	// early-returns do not consume slots from the bounded window.
+	capCtx := s.startCapture(r, rid, t0, modelName, realModel, backend.ID, protocol, isStreaming, rawBody, newBody)
+
 	// ── Per-backend concurrency guard ─────────────────────────────────────
 	release, ok := s.acquireSemaphore(r.Context(), backendID)
 	if !ok {
 		s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
+		capCtx.finishError(t0, "backend concurrency limit reached")
 		jsonError(w, "backend concurrency limit reached", http.StatusServiceUnavailable)
 		return
 	}
@@ -385,7 +421,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	rp := &httputil.ReverseProxy{
 		Transport: s.transport,
 		Director:  director(targetURL, backend, newBody, protocol, opts.pathOverride),
-		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx),
+		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
@@ -394,11 +430,115 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			logger.Request("[%s] %s %s model=%s backend=%s status=502 dur=%.3fs ERROR: %v",
 				rid, r.Method, r.URL.Path, modelName, backendID, elapsed, err)
 			log.Printf("[proxy] upstream error backend=%s: %v", backendID, err)
+			capCtx.finishError(t0, "upstream error: "+err.Error())
 			jsonError(w, "upstream error: "+err.Error(), http.StatusBadGateway)
 		},
 	}
 
 	rp.ServeHTTP(w, r)
+}
+
+// ── Capture helpers ──────────────────────────────────────────────────────────
+
+// captureCtx holds a reserved capture slot and the request-side snapshot.
+// A nil *captureCtx is safe — every method is a no-op on nil receiver.
+type captureCtx struct {
+	slot    *capture.Slot
+	payload capture.Payload
+}
+
+// startCapture reserves a capture slot if the window is open and assembles
+// the request-side payload. Returns nil if capture is disabled or the window
+// is closed — callers should treat that nil as "do nothing".
+func (s *Server) startCapture(r *http.Request, rid string, t0 time.Time,
+	virtualModel, realModel, backendID, protocol string, streaming bool,
+	rawBody, resolvedBody []byte,
+) *captureCtx {
+	c := s.capture.Load()
+	if c == nil {
+		return nil
+	}
+	slot := c.Reserve()
+	if slot == nil {
+		return nil
+	}
+	return &captureCtx{
+		slot: slot,
+		payload: capture.Payload{
+			RequestID: rid,
+			Timestamp: t0.UTC().Format(time.RFC3339Nano),
+			Request: capture.RequestSnapshot{
+				Method:       r.Method,
+				Path:         r.URL.Path,
+				VirtualModel: virtualModel,
+				RealModel:    realModel,
+				Backend:      backendID,
+				Protocol:     protocol,
+				Streaming:    streaming,
+				Headers:      safeHeaders(r.Header),
+				Incoming:     rawJSON(rawBody),
+				Resolved:     rawJSON(resolvedBody),
+			},
+		},
+	}
+}
+
+// finishSuccess records the response and writes the capture file.
+func (c *captureCtx) finishSuccess(t0 time.Time, resp capture.ResponseSnapshot) {
+	if c == nil {
+		return
+	}
+	c.payload.Response = resp
+	c.payload.Timing = timing(t0)
+	if err := c.slot.Write(c.payload); err != nil {
+		log.Printf("[capture] write failed for %s: %v", c.payload.RequestID, err)
+	}
+}
+
+// finishError records a pre-response error and writes the capture file.
+func (c *captureCtx) finishError(t0 time.Time, msg string) {
+	if c == nil {
+		return
+	}
+	c.payload.Response = capture.ResponseSnapshot{Error: msg}
+	c.payload.Timing = timing(t0)
+	if err := c.slot.Write(c.payload); err != nil {
+		log.Printf("[capture] write failed for %s: %v", c.payload.RequestID, err)
+	}
+}
+
+func timing(t0 time.Time) capture.TimingSnapshot {
+	return capture.TimingSnapshot{
+		StartedAt:  t0.UTC().Format(time.RFC3339Nano),
+		DurationMs: float64(time.Since(t0).Microseconds()) / 1000.0,
+	}
+}
+
+// rawJSON returns b as a RawMessage if it is valid JSON; otherwise quotes it
+// as a JSON string so the payload stays parseable.
+func rawJSON(b []byte) json.RawMessage {
+	if len(b) == 0 {
+		return nil
+	}
+	if json.Valid(b) {
+		return json.RawMessage(b)
+	}
+	q, _ := json.Marshal(string(b))
+	return json.RawMessage(q)
+}
+
+// safeHeaders returns a copy of h with sensitive values redacted.
+func safeHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		switch strings.ToLower(k) {
+		case "authorization", "x-api-key", "cookie", "set-cookie", "proxy-authorization":
+			out[k] = "[redacted]"
+		default:
+			out[k] = strings.Join(vs, ", ")
+		}
+	}
+	return out
 }
 
 // director returns an httputil.ReverseProxy Director that rewrites the request
@@ -492,7 +632,7 @@ func logMessageContent(rid string, body map[string]interface{}, protocol string)
 
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context) func(*http.Response) error {
+func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context, capCtx *captureCtx) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
 
@@ -507,9 +647,17 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			if logger.Get() >= logger.LevelContent {
 				parser.captureContent = true
 			}
+			var sseBuf *capture.CappedBuffer
+			var teeWriter io.Writer
+			if capCtx != nil {
+				sseBuf = &capture.CappedBuffer{Max: capture.MaxResponseBytes}
+				teeWriter = sseBuf
+			}
+			status := resp.StatusCode
 			resp.Body = &interceptedBody{
 				ReadCloser: resp.Body,
 				parser:     parser,
+				tee:        teeWriter,
 				onClose: func() {
 					parser.recordFinal()
 					elapsed := time.Since(t0).Seconds()
@@ -521,6 +669,13 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 					if parser.captureContent {
 						logger.Content("[resp %s] | %s", rid, parser.ResponseText())
 					}
+					if capCtx != nil {
+						capCtx.finishSuccess(t0, capture.ResponseSnapshot{
+							StatusCode: status,
+							SSE:        sseBuf.String(),
+							Truncated:  sseBuf.Truncated,
+						})
+					}
 				},
 			}
 		} else {
@@ -528,6 +683,9 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			data, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
+				if capCtx != nil {
+					capCtx.finishError(t0, fmt.Sprintf("read upstream body: %v", err))
+				}
 				return err
 			}
 			elapsed := time.Since(t0).Seconds()
@@ -544,6 +702,20 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			// L4: log non-streaming response content
 			if logger.Get() >= logger.LevelContent {
 				logNonStreamingResponse(rid, data, backendType)
+			}
+
+			if capCtx != nil {
+				truncated := false
+				bodyForCap := data
+				if len(bodyForCap) > capture.MaxResponseBytes {
+					bodyForCap = bodyForCap[:capture.MaxResponseBytes]
+					truncated = true
+				}
+				capCtx.finishSuccess(t0, capture.ResponseSnapshot{
+					StatusCode: resp.StatusCode,
+					Body:       rawJSON(bodyForCap),
+					Truncated:  truncated,
+				})
 			}
 
 			resp.Body = io.NopCloser(bytes.NewReader(data))

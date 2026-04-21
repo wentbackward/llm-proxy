@@ -368,9 +368,13 @@ func (b *idleTimeoutBody) Close() error {
 // interceptedBody wraps an http.Response body, feeding bytes through the SSE
 // parser as they are read by the HTTP server writing to the client. Zero copy —
 // the bytes still flow directly to the client.
+//
+// tee, if non-nil, receives a copy of every byte read. Used by the debug
+// capture feature to record raw SSE streams.
 type interceptedBody struct {
 	io.ReadCloser
 	parser    *sseParser
+	tee       io.Writer
 	onClose   func()
 	closeOnce sync.Once
 }
@@ -379,6 +383,9 @@ func (b *interceptedBody) Read(p []byte) (n int, err error) {
 	n, err = b.ReadCloser.Read(p)
 	if n > 0 {
 		b.parser.feed(p[:n])
+		if b.tee != nil {
+			b.tee.Write(p[:n])
+		}
 	}
 	return
 }

@@ -96,3 +96,74 @@ journal:
 ```
 
 When `otlp_endpoint` is empty, only stdout. When set, records flow to both stdout and the collector.
+
+## Full-body message capture (SIGUSR1)
+
+The journal records metadata (character counts, structural signals, first 8KB of the last user message) — good for observability, not enough when you need to inspect the *exact* bytes being sent upstream. For that, the proxy has a SIGUSR1-armed capture mode that dumps full request and response bodies to disk for a bounded number of requests.
+
+Typical uses:
+
+- **Prompt cache debugging** — diff the `resolved` body across consecutive requests to confirm the tool list and system prompt are byte-stable.
+- **Context-size investigations** — see exactly what the 24K characters are, not just the count.
+- **Response shape verification** — inspect MTP/thinking output fields that the metrics pipeline collapses.
+
+### Configuration
+
+```yaml
+sig_message_capture:
+  enabled: false             # off by default
+  output_folder: ""          # REQUIRED when enabled — no default location
+  max_messages: 5            # capture window size (default 5)
+```
+
+Both `enabled: true` and a non-empty `output_folder` are required for the feature to activate. An unset `output_folder` with `enabled: true` is treated as disabled rather than defaulting to a directory — bodies only land where you explicitly send them.
+
+### Arming a capture window
+
+Send `SIGUSR1` to the proxy process:
+
+```bash
+docker kill --signal=USR1 llm-proxy
+```
+
+The next `max_messages` proxied requests are each written as one JSON file to the output folder, then the window closes automatically. Send `SIGUSR1` again to re-arm. If the feature is disabled in config, the signal is logged and ignored.
+
+### Output format
+
+One file per request: `{YYYYMMDDTHHMMSS.sssZ}-{request_id}.json`, mode `0600`.
+
+```json
+{
+  "request_id": "abc12345",
+  "timestamp": "2026-04-20T18:30:45.123Z",
+  "request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "virtual_model": "gresh-general",
+    "real_model": "Qwen/Qwen3.5-35B",
+    "backend": "vllm",
+    "protocol": "openai",
+    "streaming": true,
+    "headers": { "Authorization": "[redacted]", "Content-Type": "application/json" },
+    "incoming": { "model": "gresh-general", "messages": [ ... ], "tools": [ ... ] },
+    "resolved": { "model": "Qwen/Qwen3.5-35B", "messages": [ ... ], "tools": [ ... ], "temperature": 0.7 }
+  },
+  "response": {
+    "status_code": 200,
+    "sse": "data: {...}\n\ndata: [DONE]\n\n"
+  },
+  "timing": { "started_at": "2026-04-20T18:30:45.123Z", "duration_ms": 1234.5 }
+}
+```
+
+- `incoming` is the body as received from the client.
+- `resolved` is the body as sent to the backend (after defaults, caller overrides, clamp, and protocol-specific translation).
+- Streaming responses are captured as raw SSE bytes under `response.sse`; non-streaming responses are captured under `response.body`.
+- Per-response capture is capped at 5 MB; over-cap bodies set `response.truncated: true`.
+- `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie`, and `Proxy-Authorization` headers are redacted.
+
+### Notes
+
+- Errors (semaphore rejection, upstream failures) also write a capture file with `response.error` set — the slot isn't wasted on failed requests.
+- `SIGHUP` rebuilds the capture handle from config. An armed window is cleared by reload.
+- The feature is deliberately explicit: no env var, no default folder, logs the capture location at startup so its presence is visible in `docker logs`.

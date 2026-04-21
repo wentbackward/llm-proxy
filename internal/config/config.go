@@ -119,12 +119,22 @@ type JournalConfig struct {
 	OTLPEndpoint string `yaml:"otlp_endpoint"` // optional — e.g. "http://otel-collector:4318"
 }
 
+// SigMessageCaptureConfig configures the SIGUSR1-armed full-body capture mode.
+// Disabled unless Enabled is true AND OutputFolder is set. There is no default
+// folder — bodies only land where explicitly configured.
+type SigMessageCaptureConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	OutputFolder string `yaml:"output_folder"` // required when Enabled; unset = disabled
+	MaxMessages  int    `yaml:"max_messages"`  // default 5 (see capture.DefaultMaxMessages)
+}
+
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Telemetry TelemetryConfig `yaml:"telemetry"`
-	Journal   JournalConfig   `yaml:"journal"`
-	Backends  []Backend       `yaml:"backends"`
-	Routes    []Route         `yaml:"routes"`
+	Server            ServerConfig            `yaml:"server"`
+	Telemetry         TelemetryConfig         `yaml:"telemetry"`
+	Journal           JournalConfig           `yaml:"journal"`
+	SigMessageCapture SigMessageCaptureConfig `yaml:"sig_message_capture"`
+	Backends          []Backend               `yaml:"backends"`
+	Routes            []Route                 `yaml:"routes"`
 
 	backendByID  map[string]*Backend
 	routeByModel map[string]*Route

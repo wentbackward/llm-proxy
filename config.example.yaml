@@ -21,6 +21,18 @@ journal:
   enabled: false
   otlp_endpoint: ""   # e.g. "http://otel-collector:4318"
 
+# Full request/response capture, armed by SIGUSR1 for a bounded window.
+# Disabled unless both enabled: true AND output_folder are set — there is no
+# default folder, by design. Each captured request writes one JSON file with
+# the incoming body, resolved body (as sent to backend), and response body.
+# Headers like Authorization are redacted in the capture.
+sig_message_capture:
+  enabled: false
+  output_folder: ""     # e.g. /var/log/llm-proxy/capture — REQUIRED when enabled
+  max_messages: 5       # capture window size; re-armed on each SIGUSR1
+  # Usage: docker kill --signal=USR1 llm-proxy
+  #   → captures next max_messages requests, then auto-closes the window
+
 # Upstream LLM providers
 backends:
   - id: vllm-27b

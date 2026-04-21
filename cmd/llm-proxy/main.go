@@ -104,8 +104,10 @@ func main() {
 	// ── Signal handling ────────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	hup := make(chan os.Signal, 1)
+	usr1 := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	signal.Notify(hup, syscall.SIGHUP)
+	signal.Notify(usr1, syscall.SIGUSR1)
 
 	go func() {
 		for range hup {
@@ -118,6 +120,18 @@ func main() {
 				srv.Reload(newCfg)
 			}
 			probeBackends(srv.Config())
+		}
+	}()
+
+	go func() {
+		for range usr1 {
+			cap := srv.Capture()
+			if cap == nil {
+				log.Println("[llm-proxy] SIGUSR1 received — message capture disabled; enable sig_message_capture in config")
+				continue
+			}
+			n := cap.Arm()
+			log.Printf("[llm-proxy] SIGUSR1 received — capturing next %d requests to %s", n, cap.OutputFolder())
 		}
 	}()
 

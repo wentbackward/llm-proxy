@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -943,6 +944,205 @@ routes:
 	if m, _ := captured.Body["model"].(string); m != "raw-upstream-model" {
 		t.Errorf("model should pass through as-is, got %q", m)
 	}
+}
+
+// ── SIGUSR1 message-capture tests ────────────────────────────────────────────
+
+func TestCapture_DisabledByDefault(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+	if s.Capture() != nil {
+		t.Error("capture should be nil when not configured — must not default to enabled")
+	}
+}
+
+func TestCapture_NonStreamingWritesFile(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	dir := t.TempDir()
+	cfg := s.Config()
+	cfg.SigMessageCapture = config.SigMessageCaptureConfig{
+		Enabled: true, OutputFolder: dir, MaxMessages: 2,
+	}
+	s.Reload(cfg)
+
+	cap := s.Capture()
+	if cap == nil {
+		t.Fatal("capture should be enabled after reload")
+	}
+	cap.Arm()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hello"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret-key-must-be-redacted")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", rec.Code)
+	}
+
+	files := listCaptureFiles(t, dir)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 capture file, got %d: %v", len(files), files)
+	}
+	data, _ := os.ReadFile(files[0])
+	var got map[string]interface{}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("capture file not valid JSON: %v", err)
+	}
+	// Secrets must not land on disk.
+	if !strings.Contains(string(data), "[redacted]") {
+		t.Error("capture must redact Authorization header")
+	}
+	if strings.Contains(string(data), "secret-key-must-be-redacted") {
+		t.Error("capture file contains raw secret from Authorization header")
+	}
+	// Incoming body and resolved body both captured.
+	reqObj, _ := got["request"].(map[string]interface{})
+	if reqObj["virtual_model"] != "test-model" {
+		t.Errorf("virtual_model: got %v", reqObj["virtual_model"])
+	}
+	if _, ok := reqObj["incoming"]; !ok {
+		t.Error("capture must include incoming body")
+	}
+	if _, ok := reqObj["resolved"]; !ok {
+		t.Error("capture must include resolved body")
+	}
+	respObj, _ := got["response"].(map[string]interface{})
+	if respObj["status_code"].(float64) != 200 {
+		t.Errorf("status_code: got %v", respObj["status_code"])
+	}
+	if _, ok := respObj["body"]; !ok {
+		t.Error("non-streaming capture must include response body")
+	}
+}
+
+func TestCapture_StreamingTeesSSEBytes(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	dir := t.TempDir()
+	cfg := s.Config()
+	cfg.SigMessageCapture = config.SigMessageCaptureConfig{
+		Enabled: true, OutputFolder: dir, MaxMessages: 1,
+	}
+	s.Reload(cfg)
+	s.Capture().Arm()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":  "test-model",
+		"prompt": "test",
+		"stream": true,
+	})
+	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCompletions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d", rec.Code)
+	}
+
+	files := listCaptureFiles(t, dir)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 capture file, got %d", len(files))
+	}
+	data, _ := os.ReadFile(files[0])
+	var got map[string]interface{}
+	json.Unmarshal(data, &got)
+	respObj, _ := got["response"].(map[string]interface{})
+	sse, _ := respObj["sse"].(string)
+	if sse == "" {
+		t.Fatal("streaming capture must include raw SSE bytes")
+	}
+	if !strings.Contains(sse, "data: ") {
+		t.Errorf("SSE capture should preserve raw format, got: %q", sse)
+	}
+	if !strings.Contains(sse, "[DONE]") {
+		t.Error("SSE capture should include the [DONE] terminator")
+	}
+}
+
+func TestCapture_WindowClosesAfterN(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	dir := t.TempDir()
+	cfg := s.Config()
+	cfg.SigMessageCapture = config.SigMessageCaptureConfig{
+		Enabled: true, OutputFolder: dir, MaxMessages: 2,
+	}
+	s.Reload(cfg)
+	s.Capture().Arm()
+
+	sendSimpleChat := func() {
+		body, _ := json.Marshal(map[string]interface{}{
+			"model":    "test-model",
+			"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+		})
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.handleProxy(rec, req)
+	}
+
+	// Send 4 requests, only 2 should be captured (window size).
+	for i := 0; i < 4; i++ {
+		sendSimpleChat()
+	}
+
+	files := listCaptureFiles(t, dir)
+	if len(files) != 2 {
+		t.Errorf("expected exactly 2 captures (window size), got %d", len(files))
+	}
+}
+
+func TestCapture_NotArmedDoesNotCapture(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	dir := t.TempDir()
+	cfg := s.Config()
+	cfg.SigMessageCapture = config.SigMessageCaptureConfig{
+		Enabled: true, OutputFolder: dir, MaxMessages: 5,
+	}
+	s.Reload(cfg)
+	// Do NOT call Arm() — window should be closed.
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleProxy(rec, req)
+
+	files := listCaptureFiles(t, dir)
+	if len(files) != 0 {
+		t.Errorf("no SIGUSR1 armed → no capture expected, got %d files", len(files))
+	}
+}
+
+func listCaptureFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out
 }
 
 func sendChat(t *testing.T, s *Server, model string, wantStatus int) {
