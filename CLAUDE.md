@@ -43,7 +43,13 @@ When adding new code that touches any of those three feature areas, split across
 
 ## Protocol rule
 
-The proxy does NOT translate between OpenAI and Anthropic protocols. A client speaking OpenAI chat completions can only reach `openai`-type backends; Anthropic messages clients can only reach `anthropic`-type backends. Do not add bidirectional translation without explicit scope from the user.
+The proxy does NOT translate between protocols. Three lanes, each isolated:
+
+- OpenAI (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) → `type: openai` backends only
+- Anthropic (`/v1/messages`) → `type: anthropic` backends only
+- Ollama native (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) → `type: ollama` backends only
+
+Do not add bidirectional translation without explicit scope from the user. Ollama's sampling params are nested under `body["options"]`; the proxyRequest pipeline flattens them before router merge and re-nests before send — see `internal/proxy/server.go` for the pattern.
 
 ## Logging and debug capture
 

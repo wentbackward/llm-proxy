@@ -184,6 +184,13 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/completions", auth(s.handleCompletions))
 	mux.HandleFunc("/v1/embeddings", auth(s.handleEmbeddings))
 	mux.HandleFunc("/v1/messages", auth(s.handleProxy))
+
+	// Ollama-native endpoints — pure passthrough to ollama-type backends.
+	mux.HandleFunc("/api/chat", auth(s.handleOllamaChat))
+	mux.HandleFunc("/api/generate", auth(s.handleOllamaGenerate))
+	mux.HandleFunc("/api/embed", auth(s.handleOllamaEmbed))
+	mux.HandleFunc("/api/embeddings", auth(s.handleOllamaEmbed))
+	mux.HandleFunc("/api/tags", auth(s.handleOllamaTags))
 }
 
 // bearerAuth wraps a handler with bearer token authentication.
@@ -334,6 +341,21 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	cfg := s.cfg.Load()
 	rtr := s.rtr.Load()
 
+	// Ollama nests sampling params under body["options"]. Flatten them into
+	// body's top level so the router's param merge sees caller-supplied values;
+	// we re-nest below after defaults/caller/clamp have been resolved.
+	var ollamaKeys map[string]struct{}
+	if protocol == "ollama" {
+		ollamaKeys = make(map[string]struct{})
+		if opts, ok := body["options"].(map[string]interface{}); ok {
+			for k, v := range opts {
+				ollamaKeys[k] = struct{}{}
+				body[k] = v
+			}
+			delete(body, "options")
+		}
+	}
+
 	res, err := rtr.Resolve(modelName, body)
 	if err != nil {
 		if !cfg.Server.PassthroughUnrouted {
@@ -359,6 +381,9 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 		// Apply merged sampling params back to the body
 		for k, v := range res.Params {
 			body[k] = v
+			if ollamaKeys != nil {
+				ollamaKeys[k] = struct{}{}
+			}
 		}
 		// Deduplicate max_tokens vs max_completion_tokens — backends reject both
 		if _, ok := body["max_tokens"]; ok {
@@ -409,6 +434,23 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	// ── Protocol-specific param translation ────────────────────────────────
 	translateParams(body, backend, isStreaming)
+
+	// ── Re-nest Ollama sampling params under body["options"] ──────────────
+	// Ollama expects temperature, top_p, etc. inside an "options" sub-object.
+	// We flattened earlier so the router's merge could see caller-supplied
+	// values; put everything back in the shape the upstream wants.
+	if protocol == "ollama" && len(ollamaKeys) > 0 {
+		options := make(map[string]interface{}, len(ollamaKeys))
+		for k := range ollamaKeys {
+			if v, ok := body[k]; ok {
+				options[k] = v
+				delete(body, k)
+			}
+		}
+		if len(options) > 0 {
+			body["options"] = options
+		}
+	}
 
 	// ── Re-encode modified body ────────────────────────────────────────────
 	newBody, err := json.Marshal(body)
@@ -671,9 +713,19 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 		}
 
 		if streaming && resp.StatusCode == http.StatusOK {
-			parser := newSSEParser(backendID, realModel, backendType, t0, s.metrics, ctx)
-			if logger.Get() >= logger.LevelContent {
-				parser.captureContent = true
+			// Pick the parser that matches the upstream protocol. SSE parsing
+			// for OpenAI/Anthropic (both use text/event-stream); minimal
+			// first-byte-TTFT for Ollama (NDJSON, not parsed).
+			var parser streamParser
+			var ssep *sseParser
+			if backendType == "ollama" {
+				parser = newOllamaParser(backendID, realModel, t0, s.metrics, ctx)
+			} else {
+				ssep = newSSEParser(backendID, realModel, backendType, t0, s.metrics, ctx)
+				if logger.Get() >= logger.LevelContent {
+					ssep.captureContent = true
+				}
+				parser = ssep
 			}
 			var sseBuf *capture.CappedBuffer
 			var teeWriter io.Writer
@@ -694,8 +746,8 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 					logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true",
 						rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
-					if parser.captureContent {
-						logger.Content("[resp %s] | %s", rid, parser.ResponseText())
+					if ssep != nil && ssep.captureContent {
+						logger.Content("[resp %s] | %s", rid, ssep.ResponseText())
 					}
 					if capCtx != nil {
 						capCtx.finishSuccess(t0, capture.ResponseSnapshot{

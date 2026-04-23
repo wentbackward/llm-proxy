@@ -106,7 +106,7 @@ client → POST /v1/chat/completions   body.model = "my-virtual-name"
        └──────────────────────┘
 ```
 
-The proxy **does not translate between OpenAI and Anthropic protocols**. A client speaking OpenAI chat completions can only reach `openai`-type backends; a client speaking Anthropic messages can only reach `anthropic`-type backends. Pick one per client.
+The proxy **does not translate between protocols**. A client speaking OpenAI chat completions (`/v1/chat/completions`) can only reach `openai`-type backends; Anthropic messages (`/v1/messages`) can only reach `anthropic`-type backends; Ollama native (`/api/chat`, `/api/generate`, etc.) can only reach `ollama`-type backends. Pick one per client — the proxy forwards the wire format unchanged.
 
 ### Naming virtual models — the "look like any provider" recipe
 
@@ -178,12 +178,14 @@ If the version of LiteLLM you're running *doesn't* strip the prefix, you'll see 
 
 #### Ollama
 
-If your client offers "Ollama" as a provider option, it's usually expecting Ollama's OpenAI-compatible endpoint at `http://host:11434/v1`. Point it at llm-proxy instead — the protocol is identical:
+**Clients speaking Ollama native (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`):**
 
-- Base URL: `http://llm-proxy:4000/v1`
-- API key: your `server.api_key` (Ollama itself needs no key; llm-proxy does)
+- Base URL: `http://llm-proxy:4000` (no `/api` suffix — llm-proxy exposes those paths directly)
+- API key: your `server.api_key`
 
-The client sees your virtual models via `/v1/models` the same way it would see Ollama's. If the client uses Ollama's native `/api/chat` endpoint rather than `/v1`, llm-proxy can't serve it — switch the client to its generic OpenAI option.
+Configure a route pointing at a `type: ollama` backend. Ollama's sampling params live under `"options"` in the request body; route `defaults` and `clamp` merge into that nested object automatically. Pure passthrough — the proxy doesn't reshape messages or reinterpret parameters the way Ollama's OpenAI-compat layer does.
+
+**Clients that only speak OpenAI-compat mode**: point them at `/v1` with a `type: openai` backend instead (Ollama exposes `/v1` too, but you get Ollama's own interpretation of OpenAI semantics — known to surprise on system prompts and temperature).
 
 #### opencode
 

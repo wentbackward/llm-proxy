@@ -97,7 +97,7 @@ func (p *PortRange) UnmarshalYAML(value *yaml.Node) error {
 
 type Backend struct {
 	ID             string    `yaml:"id"`
-	Type           string    `yaml:"type"` // openai | anthropic
+	Type           string    `yaml:"type"` // openai | anthropic | ollama
 	BaseURL        string    `yaml:"base_url"`
 	APIKey         string    `yaml:"api_key"`
 	AuthType       string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
@@ -290,8 +290,8 @@ func validateBackends(backends []Backend) (map[string]bool, error) {
 		if b.BaseURL == "" {
 			return nil, fmt.Errorf("backend %q: base_url required", b.ID)
 		}
-		if b.Type != "openai" && b.Type != "anthropic" {
-			return nil, fmt.Errorf("backend %q: type must be openai or anthropic, got %q", b.ID, b.Type)
+		if b.Type != "openai" && b.Type != "anthropic" && b.Type != "ollama" {
+			return nil, fmt.Errorf("backend %q: type must be openai, anthropic, or ollama, got %q", b.ID, b.Type)
 		}
 		if b.Default {
 			if defaultID != "" {

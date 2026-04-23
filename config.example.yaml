@@ -75,6 +75,11 @@ backends:
     timeout_seconds: 300
     skip_probe: true   # cloud APIs don't expose /v1/models
 
+  - id: ollama
+    type: ollama                  # routes /api/chat, /api/generate, /api/embed(dings), /api/tags
+    base_url: "http://localhost:11434"
+    timeout_seconds: 300
+
   - id: openai
     type: openai
     base_url: "https://api.openai.com"

@@ -15,6 +15,14 @@ import (
 
 const maxContentCapture = 32768 // 32KB cap for L4 response capture
 
+// streamParser is the minimum contract interceptedBody needs from a protocol
+// parser: bytes flow in via feed() in read order; recordFinal() is called
+// once when the stream closes and should emit per-request summary metrics.
+type streamParser interface {
+	feed(data []byte)
+	recordFinal()
+}
+
 // ── SSE parser ────────────────────────────────────────────────────────────────
 
 // sseParser extracts telemetry from a streaming SSE response without buffering
@@ -257,6 +265,40 @@ func (p *sseParser) ResponseText() string {
 	return s
 }
 
+// ── Ollama parser ────────────────────────────────────────────────────────────
+
+// ollamaParser captures the cheap-to-obtain metrics for Ollama-native
+// streaming responses (NDJSON) without actually parsing the body: time to
+// first byte. Token counts are embedded in NDJSON and are left for a future
+// dedicated parser.
+type ollamaParser struct {
+	backendID string
+	model     string
+	t0        time.Time
+	metrics   *telemetry.Metrics
+	ctx       context.Context
+
+	ttftDone bool
+}
+
+func newOllamaParser(backendID, model string, t0 time.Time, m *telemetry.Metrics, ctx context.Context) *ollamaParser {
+	return &ollamaParser{backendID: backendID, model: model, t0: t0, metrics: m, ctx: ctx}
+}
+
+// feed records TTFT on the first non-empty chunk and otherwise ignores the
+// stream content — Ollama's NDJSON format is passed through unparsed.
+func (p *ollamaParser) feed(data []byte) {
+	if !p.ttftDone && len(data) > 0 {
+		elapsed := time.Since(p.t0).Seconds()
+		p.metrics.TTFT.Record(p.ctx, elapsed, telemetry.BackendAttrs(p.backendID, p.model))
+		p.ttftDone = true
+	}
+}
+
+// recordFinal is a no-op for Ollama: there are no accumulated token counts
+// to flush, and request duration is recorded by the non-streaming sibling.
+func (p *ollamaParser) recordFinal() {}
+
 // firstDeltaContent returns the text content and reasoning/thinking content
 // from the first choice delta in an OpenAI-style SSE event.
 func firstDeltaContent(evt map[string]interface{}) (content, reasoning string) {
@@ -366,15 +408,15 @@ func (b *idleTimeoutBody) Close() error {
 
 // ── interceptedBody ───────────────────────────────────────────────────────────
 
-// interceptedBody wraps an http.Response body, feeding bytes through the SSE
+// interceptedBody wraps an http.Response body, feeding bytes through the
 // parser as they are read by the HTTP server writing to the client. Zero copy —
 // the bytes still flow directly to the client.
 //
 // tee, if non-nil, receives a copy of every byte read. Used by the debug
-// capture feature to record raw SSE streams.
+// capture feature to record raw streaming bytes.
 type interceptedBody struct {
 	io.ReadCloser
-	parser    *sseParser
+	parser    streamParser
 	tee       io.Writer
 	onClose   func()
 	closeOnce sync.Once

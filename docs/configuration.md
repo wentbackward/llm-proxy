@@ -65,7 +65,7 @@ backends:
     skip_probe: true              # cloud APIs don't expose /v1/models
 ```
 
-- **`type`** — `openai` or `anthropic`. Determines auth header format, SSE event parsing, and `enable_thinking` translation. Must match the protocol the client speaks.
+- **`type`** — `openai`, `anthropic`, or `ollama`. Determines auth header format, stream parsing, and `enable_thinking` translation. Must match the protocol the client speaks: OpenAI format (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) routes to `openai` backends; Anthropic format (`/v1/messages`) routes to `anthropic` backends; Ollama-native format (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) routes to `ollama` backends.
 - **`base_url`** — scheme + host. Trailing `/v1` is stripped automatically at load time.
 - **`api_key`** — static key or OAuth token. Sent to the backend using the auth header format determined by `auth_type`. If empty, the client's original auth headers pass through to the backend.
 - **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
