@@ -44,9 +44,9 @@ jobs:
             goarch: arm64
           - goos: darwin
             goarch: amd64
-          - goos: windows
-            goarch: amd64
-            ext: .exe
+          # Windows intentionally omitted: the SIGUSR1 capture handler is
+          # POSIX-only and the proxy ships as a Linux Docker container;
+          # Windows devs can `go build` from source if they need a binary.
     steps:
       - uses: actions/checkout@v5
 
