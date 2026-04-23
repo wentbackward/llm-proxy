@@ -97,6 +97,7 @@ type Backend struct {
 	TimeoutSeconds int       `yaml:"timeout_seconds"`
 	MaxConcurrency int       `yaml:"max_concurrency"` // 0 = unlimited; limits in-flight requests to this backend
 	SkipProbe      bool      `yaml:"skip_probe"`      // skip /v1/models health check at startup/SIGHUP
+	Default        bool      `yaml:"default"`         // target for passthrough_unrouted and /v1/models; at most one backend may set this
 	Ports          PortRange `yaml:"ports"`            // expand this backend into one per port; use {port} in id and base_url
 }
 
@@ -264,6 +265,7 @@ func validate(cfg *Config) error {
 
 func validateBackends(backends []Backend) (map[string]bool, error) {
 	ids := make(map[string]bool, len(backends))
+	var defaultID string
 	for _, b := range backends {
 		if b.ID == "" {
 			return nil, fmt.Errorf("backend missing id")
@@ -273,6 +275,12 @@ func validateBackends(backends []Backend) (map[string]bool, error) {
 		}
 		if b.Type != "openai" && b.Type != "anthropic" {
 			return nil, fmt.Errorf("backend %q: type must be openai or anthropic, got %q", b.ID, b.Type)
+		}
+		if b.Default {
+			if defaultID != "" {
+				return nil, fmt.Errorf("multiple backends marked default: %q and %q", defaultID, b.ID)
+			}
+			defaultID = b.ID
 		}
 		ids[b.ID] = true
 	}
@@ -313,6 +321,36 @@ func (c *Config) Backend(id string) (*Backend, bool) {
 func (c *Config) Route(model string) (*Route, bool) {
 	r, ok := c.routeByModel[model]
 	return r, ok
+}
+
+// DefaultBackend returns the backend marked default: true, falling back to
+// the first configured backend when no default is set. Returns nil if no
+// backends are configured.
+//
+// Used as the target for passthrough_unrouted requests and /v1/models.
+// The implicit "first backend" fallback keeps older configs working; new
+// configs should set default: true on exactly one backend to be explicit.
+func (c *Config) DefaultBackend() *Backend {
+	for i := range c.Backends {
+		if c.Backends[i].Default {
+			return &c.Backends[i]
+		}
+	}
+	if len(c.Backends) > 0 {
+		return &c.Backends[0]
+	}
+	return nil
+}
+
+// HasExplicitDefault reports whether any backend has default: true set.
+// Used at startup to decide whether to log the implicit-fallback warning.
+func (c *Config) HasExplicitDefault() bool {
+	for i := range c.Backends {
+		if c.Backends[i].Default {
+			return true
+		}
+	}
+	return false
 }
 
 // VirtualModels returns all configured virtual model names.

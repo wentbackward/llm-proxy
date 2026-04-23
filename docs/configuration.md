@@ -19,7 +19,7 @@ server:
     idle_conn_timeout: 120       # seconds before idle connections are closed (default: 120)
 ```
 
-- **`passthrough_unrouted`** — when `false` (default), requests for unknown model names are rejected with a 404 that lists available virtual models. When `true`, unknown models are forwarded to the first configured backend as-is.
+- **`passthrough_unrouted`** — when `false` (default), requests for unknown model names are rejected with a 404 that lists available virtual models. When `true`, unknown models are forwarded to the default backend as-is (see `default:` on backends below).
 - **`transport.max_idle_conns`** — total number of idle (keep-alive) connections across all backends. Default: 100.
 - **`transport.max_idle_conns_per_host`** — idle connections retained per backend host. Increase this if you have few backends with high concurrency. Default: 20.
 - **`transport.idle_conn_timeout`** — seconds an idle connection sits unused before being closed. Default: 120.
@@ -72,6 +72,7 @@ backends:
 - **`timeout_seconds`** — idle timeout per request. If no bytes flow for this duration, the request is cancelled. Default: 300.
 - **`max_concurrency`** — maximum number of in-flight requests to this backend. When the limit is reached, new requests queue until a slot opens or the client disconnects. `0` (default) means unlimited.
 - **`skip_probe`** — skip the startup `/v1/models` health check. Set `true` for cloud APIs.
+- **`default`** — marks this backend as the fallback target for `passthrough_unrouted` requests and the source for `/v1/models` responses. At most one backend may set `default: true`; config fails to load if multiple do. If no backend is marked default, the first one in the list is used and a warning is logged at startup when `passthrough_unrouted: true`.
 - **`ports`** — expand a single backend definition into one backend per port. Use `{port}` as a placeholder in `id` and `base_url`. Accepts a single integer, a YAML list, or a `"lo-hi"` range string (inclusive). All other fields are copied to each expanded backend.
 
 ```yaml

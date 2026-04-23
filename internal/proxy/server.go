@@ -107,7 +107,16 @@ func (s *Server) Reload(cfg *config.Config) {
 		if b.MaxConcurrency > 0 {
 			conc = fmt.Sprintf("max=%d", b.MaxConcurrency)
 		}
-		log.Printf("[reload]   backend %-16s %s (%s)", b.ID, b.BaseURL, conc)
+		marker := ""
+		if b.Default {
+			marker = " [default]"
+		}
+		log.Printf("[reload]   backend %-16s %s (%s)%s", b.ID, b.BaseURL, conc, marker)
+	}
+	if cfg.Server.PassthroughUnrouted {
+		if def := cfg.DefaultBackend(); def != nil && !cfg.HasExplicitDefault() {
+			log.Printf("[reload]   passthrough_unrouted: true but no backend has default: true — falling back to first backend (%s)", def.ID)
+		}
 	}
 	for _, r := range cfg.Routes {
 		if r.AutoRoute != nil {
@@ -199,8 +208,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	cfg := s.cfg.Load()
 
-	if len(cfg.Backends) > 0 {
-		backend := &cfg.Backends[0]
+	if backend := cfg.DefaultBackend(); backend != nil {
 		upURL := backend.BaseURL + "/v1/models"
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, nil)
 		if err == nil {
@@ -315,12 +323,12 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			jsonError(w, fmt.Sprintf("unknown model %q — available models: %v", modelName, available), http.StatusNotFound)
 			return
 		}
-		// Passthrough mode — forward to first backend.
-		if len(cfg.Backends) == 0 {
+		// Passthrough mode — forward to the default backend.
+		b := cfg.DefaultBackend()
+		if b == nil {
 			jsonError(w, "no backends configured", http.StatusServiceUnavailable)
 			return
 		}
-		b := &cfg.Backends[0]
 		backend = b
 		realModel = modelName
 		log.Printf("[proxy] no route for %q, passing through to %s (from=%s ua=%s)",

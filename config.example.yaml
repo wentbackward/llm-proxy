@@ -42,6 +42,7 @@ backends:
     base_url: "http://localhost:3022"
     api_key: "${VLLM_API_KEY}"  # omit or leave blank if no auth
     timeout_seconds: 300
+    default: true         # target for passthrough_unrouted and /v1/models (at most one backend)
 
   - id: vllm-9b
     type: openai

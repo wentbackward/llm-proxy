@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -217,6 +218,84 @@ backends:
 	b, _ := cfg.Backend("a")
 	if b.TimeoutSeconds != 300 {
 		t.Errorf("default timeout: got %d, want 300", b.TimeoutSeconds)
+	}
+}
+
+func TestDefaultBackend_ExplicitDefault(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: first
+    type: openai
+    base_url: "http://a"
+  - id: chosen
+    type: openai
+    base_url: "http://b"
+    default: true
+  - id: third
+    type: openai
+    base_url: "http://c"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.HasExplicitDefault() {
+		t.Error("HasExplicitDefault should be true")
+	}
+	def := cfg.DefaultBackend()
+	if def == nil || def.ID != "chosen" {
+		t.Errorf("DefaultBackend: got %v, want chosen", def)
+	}
+}
+
+func TestDefaultBackend_FallbackToFirst(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: first
+    type: openai
+    base_url: "http://a"
+  - id: second
+    type: openai
+    base_url: "http://b"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HasExplicitDefault() {
+		t.Error("HasExplicitDefault should be false")
+	}
+	def := cfg.DefaultBackend()
+	if def == nil || def.ID != "first" {
+		t.Errorf("DefaultBackend fallback: got %v, want first", def)
+	}
+}
+
+func TestDefaultBackend_NoBackends(t *testing.T) {
+	cfg := &Config{}
+	if def := cfg.DefaultBackend(); def != nil {
+		t.Errorf("DefaultBackend with no backends: got %v, want nil", def)
+	}
+}
+
+func TestDefaultBackend_MultipleDefaultsRejected(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://a"
+    default: true
+  - id: b
+    type: openai
+    base_url: "http://b"
+    default: true
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for two default backends")
+	}
+	if !strings.Contains(err.Error(), "default") {
+		t.Errorf("error should mention default, got: %v", err)
 	}
 }
 
