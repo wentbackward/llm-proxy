@@ -6,6 +6,9 @@ server:
   # log_level: 1                 # 0=errors, 1=requests, 2=+headers, 3=+body preview, 4=+full message text
                                   # LOG_LEVEL env var overrides this when set
   max_request_body_mb: 50         # hard cap per request body (OOM protection); 0 = use default
+  # Secure by default: the proxy refuses to start without TLS unless allow_plaintext is true.
+  # Set allow_plaintext: true only on a trusted private network (Tailscale/VPN/LAN).
+  allow_plaintext: false
   tls:
     cert: ""   # path to TLS certificate (e.g. /certs/spark-01.ts.net.crt)
     key:  ""   # path to TLS private key  (e.g. /certs/spark-01.ts.net.key)
@@ -18,9 +21,14 @@ telemetry:
   prometheus:
     enabled: true
     host: "127.0.0.1"   # bind address; default localhost-only since /metrics has no auth.
-                        # Set "0.0.0.0" to expose on the network (do this only on a trusted network).
     port: 9091
     path: /metrics
+    # To expose metrics on a non-loopback host, either configure TLS (below) or
+    # acknowledge plaintext operation with allow_plaintext: true.
+    allow_plaintext: false
+    tls:
+      cert: ""          # independent of server.tls; leave empty to serve plaintext (only valid on loopback or with allow_plaintext)
+      key:  ""
 
 journal:
   enabled: false

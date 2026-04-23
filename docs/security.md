@@ -21,12 +21,14 @@ Explicitly **not** addressed:
 
 ### Between clients and the proxy
 
-Two options for wire encryption:
+**Secure by default.** The proxy refuses to start without TLS unless `server.allow_plaintext: true` is explicitly set. You get one of:
 
-1. **Tailscale / WireGuard.** If clients and the proxy share a tailnet, all IP traffic between them is encrypted at the WireGuard layer. Running the proxy on plain HTTP inside that tunnel is equivalent in practice to HTTPS over the open internet.
-2. **Gateway TLS.** Set `server.tls.cert` and `server.tls.key` in config. The proxy serves HTTPS directly. Use this when exposing the proxy outside a trusted network or when you want defense-in-depth on top of Tailscale.
+1. **Gateway TLS** (default expectation). Set `server.tls.cert` and `server.tls.key`. The proxy serves HTTPS directly. Use with any PKI — internal CA, Let's Encrypt, Tailscale-provisioned cert, or self-signed for dev.
+2. **Explicit plaintext**. `server.allow_plaintext: true` + no cert → server logs `PLAINTEXT — allow_plaintext: true` at startup and runs HTTP. Appropriate on a tailnet, VPN, or trusted private network. Not appropriate on the open internet.
 
-When using Tailscale, you can provision a per-node cert with `tailscale cert <host>.your-tailnet.ts.net` and point `server.tls` at it — clients then connect to `https://<host>.your-tailnet.ts.net:4000/v1` with certificate verification.
+If neither condition is met, startup fails with a clear message pointing at both options. This is intentional — the path of least resistance should leave no port serving plaintext.
+
+When using Tailscale, you can provision a per-node cert with `tailscale cert <host>.your-tailnet.ts.net` and point `server.tls` at it — clients then connect to `https://<host>.your-tailnet.ts.net:4000/v1` with certificate verification. Or stick with plaintext + WireGuard encryption by setting `allow_plaintext: true`; both are valid choices, you just have to pick one.
 
 ### Between the proxy and upstream providers
 
@@ -34,7 +36,15 @@ Standard Go `net/http` transport with system CA bundle. Any backend `base_url` s
 
 ### Metrics endpoint
 
-The Prometheus `/metrics` endpoint has **no authentication**. It binds to `127.0.0.1:9091` by default — localhost-only, no external access. To expose it on your network for a scraper, set `telemetry.prometheus.host: "0.0.0.0"` explicitly in config. Do this only on a trusted network; anyone who can reach the port can read backend IDs, model names, request volumes, token counts, and error rates.
+The Prometheus `/metrics` endpoint has **no authentication**. It binds to `127.0.0.1:9091` by default — localhost-only, no external access.
+
+If you want to expose metrics off-host, three options:
+
+1. **Keep loopback-bind and run the scraper on the same host** (or tailnet, via host networking). Simplest; no TLS needed since traffic stays on loopback.
+2. **Set `telemetry.prometheus.tls.cert` + `tls.key`** and bind to your network interface. The metrics server accepts its own cert independent of the gateway's; you can use a different cert/CA if you want. HTTPS scrape at `https://host:9091/metrics`.
+3. **Set `telemetry.prometheus.allow_plaintext: true`** and bind wider. Same acknowledgement pattern as the gateway — explicit opt-in required. Appropriate inside a corporate network where network policy is the security boundary.
+
+Startup refuses to bind plaintext on a non-loopback host unless one of conditions 2 or 3 is met.
 
 ## Authentication
 

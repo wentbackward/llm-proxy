@@ -259,11 +259,11 @@ The container-local path is ephemeral — files live in the container's writable
 
 llm-proxy is built for personal/small-team use behind a trusted boundary — Tailscale, VPN, or a private subnet. A few things are worth knowing:
 
-**Transport.** Two reasonable options: (a) run on Tailscale and let WireGuard encrypt the wire — plaintext HTTP between tailnet peers is as safe in practice as HTTPS over the open internet; or (b) configure `server.tls` with a cert and key for direct HTTPS. Outbound to providers is always HTTPS if the `base_url` says so, verified against the system CA bundle.
+**Transport is secure by default.** The proxy refuses to start without TLS unless `server.allow_plaintext: true` is explicitly set. Configure `server.tls.cert` + `server.tls.key` for HTTPS, or set the plaintext opt-in if you're behind Tailscale/VPN and accepting the link-layer encryption as your boundary. Outbound to providers is always HTTPS when the `base_url` says so, verified against the system CA bundle.
 
 **Auth.** Clients send `Authorization: Bearer <server.api_key>`. The compare is constant-time. The token is static — rotate by editing config and sending SIGHUP. Empty `api_key` disables auth (only safe on a loopback-only bind).
 
-**Metrics.** `/metrics` has no auth. It binds to `127.0.0.1:9091` by default — localhost-only. Set `telemetry.prometheus.host: "0.0.0.0"` to expose on a trusted network.
+**Metrics.** `/metrics` has no auth. It binds to `127.0.0.1:9091` by default — localhost-only, safe for plaintext. To expose it off-host, either bind wider and configure `telemetry.prometheus.tls.cert` + `tls.key` for HTTPS (independent of the gateway cert), or set `telemetry.prometheus.allow_plaintext: true` on a trusted network. Non-loopback plaintext without opt-in is refused at startup.
 
 **Features that can expose prompt contents.** This is the part to read carefully in the [full security doc](docs/security.md). In summary:
 

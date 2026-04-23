@@ -35,15 +35,18 @@ type ServerConfig struct {
 	PassthroughUnrouted bool            `yaml:"passthrough_unrouted"` // false = reject unknown models; true = forward to first backend
 	LogLevel            *int            `yaml:"log_level"`            // 0-4 (see internal/logger); LOG_LEVEL env wins when set
 	MaxRequestBodyMB    int             `yaml:"max_request_body_mb"`  // hard cap per request body; default 50, 0 means use default
+	AllowPlaintext      bool            `yaml:"allow_plaintext"`      // required to start without TLS; appropriate only on Tailscale/private networks
 	TLS                 TLSConfig       `yaml:"tls"`
 	Transport           TransportConfig `yaml:"transport"`
 }
 
 type PrometheusConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Host    string `yaml:"host"` // bind address; default 127.0.0.1 (localhost-only, no auth on metrics)
-	Port    int    `yaml:"port"`
-	Path    string `yaml:"path"`
+	Enabled        bool      `yaml:"enabled"`
+	Host           string    `yaml:"host"` // bind address; default 127.0.0.1 (localhost-only, no auth on metrics)
+	Port           int       `yaml:"port"`
+	Path           string    `yaml:"path"`
+	AllowPlaintext bool      `yaml:"allow_plaintext"` // required to bind non-loopback without TLS
+	TLS            TLSConfig `yaml:"tls"`             // independent of server.tls; leave empty to serve plaintext (loopback only, or with allow_plaintext)
 }
 
 type TelemetryConfig struct {
@@ -365,6 +368,46 @@ func (c *Config) HasExplicitDefault() bool {
 		}
 	}
 	return false
+}
+
+// ValidateListenPolicy enforces "secure by default" on the listening ports:
+// the proxy refuses to bind plaintext unless the operator explicitly
+// acknowledges the risk via allow_plaintext. Loopback binds on metrics
+// are always allowed since the traffic never leaves the host.
+//
+// Call from main after Load so startup fails fast with a clear message
+// rather than silently serving plaintext.
+func (c *Config) ValidateListenPolicy() error {
+	// Gateway — always network-facing, always requires TLS or explicit opt-in.
+	gatewayTLS := c.Server.TLS.Cert != "" && c.Server.TLS.Key != ""
+	if !gatewayTLS && !c.Server.AllowPlaintext {
+		return fmt.Errorf("server: refusing to start without TLS. " +
+			"Set server.tls.cert + server.tls.key for HTTPS, or " +
+			"set server.allow_plaintext: true to acknowledge plaintext " +
+			"operation (appropriate on Tailscale or a trusted private network)")
+	}
+
+	// Metrics — loopback bind is always safe; other binds need TLS or opt-in.
+	p := &c.Telemetry.Prometheus
+	if !p.Enabled {
+		return nil
+	}
+	metricsTLS := p.TLS.Cert != "" && p.TLS.Key != ""
+	if metricsTLS || isLoopbackHost(p.Host) || p.AllowPlaintext {
+		return nil
+	}
+	return fmt.Errorf("telemetry.prometheus: refusing to bind %s:%d plaintext. "+
+		"Keep host=127.0.0.1 (default), set telemetry.prometheus.tls.cert + key, "+
+		"or set telemetry.prometheus.allow_plaintext: true", p.Host, p.Port)
+}
+
+// isLoopbackHost reports whether a bind host refers to the local machine only.
+func isLoopbackHost(h string) bool {
+	switch h {
+	case "127.0.0.1", "localhost", "::1", "[::1]":
+		return true
+	}
+	return strings.HasPrefix(h, "127.")
 }
 
 // VirtualModels returns all configured virtual model names.

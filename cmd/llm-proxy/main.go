@@ -33,6 +33,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	if err := cfg.ValidateListenPolicy(); err != nil {
+		log.Fatalf("%v", err)
+	}
 	logger.Apply(cfg.Server.LogLevel)
 
 	metrics, metricsHandler, err := telemetry.Init()
@@ -89,7 +92,8 @@ func main() {
 				log.Fatalf("proxy server: %v", err)
 			}
 		} else {
-			log.Printf("[llm-proxy] listening on %s", proxyAddr)
+			// Validated earlier: allow_plaintext must be true to reach here.
+			log.Printf("[llm-proxy] listening on %s (PLAINTEXT — allow_plaintext: true)", proxyAddr)
 			if err := proxyServer.ListenAndServe(); err != http.ErrServerClosed {
 				log.Fatalf("proxy server: %v", err)
 			}
@@ -98,10 +102,19 @@ func main() {
 
 	if metricsServer != nil {
 		go func() {
-			log.Printf("[llm-proxy] metrics on %s:%d%s",
-				cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
-			if err := metricsServer.ListenAndServe(); err != http.ErrServerClosed {
-				log.Fatalf("metrics server: %v", err)
+			mt := cfg.Telemetry.Prometheus.TLS
+			if mt.Cert != "" && mt.Key != "" {
+				log.Printf("[llm-proxy] metrics on %s:%d%s (TLS)",
+					cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
+				if err := metricsServer.ListenAndServeTLS(mt.Cert, mt.Key); err != http.ErrServerClosed {
+					log.Fatalf("metrics server: %v", err)
+				}
+			} else {
+				log.Printf("[llm-proxy] metrics on %s:%d%s",
+					cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
+				if err := metricsServer.ListenAndServe(); err != http.ErrServerClosed {
+					log.Fatalf("metrics server: %v", err)
+				}
 			}
 		}()
 	}
@@ -116,12 +129,21 @@ func main() {
 		for range hup {
 			log.Println("[llm-proxy] SIGHUP received — reloading config")
 			newCfg, err := config.Load(cfgPath)
-			if err != nil {
+			switch {
+			case err != nil:
 				log.Printf("[llm-proxy] config reload failed: %v (keeping old config)", err)
 				logger.Apply(srv.Config().Server.LogLevel)
-			} else {
-				srv.Reload(newCfg)
-				logger.Apply(newCfg.Server.LogLevel)
+			default:
+				// Enforce TLS policy on reload too — an operator adding a
+				// network-facing metrics bind shouldn't silently swap to
+				// plaintext just because they used SIGHUP instead of restart.
+				if perr := newCfg.ValidateListenPolicy(); perr != nil {
+					log.Printf("[llm-proxy] config reload rejected: %v (keeping old config)", perr)
+					logger.Apply(srv.Config().Server.LogLevel)
+				} else {
+					srv.Reload(newCfg)
+					logger.Apply(newCfg.Server.LogLevel)
+				}
 			}
 			probeBackends(srv.Config())
 		}
