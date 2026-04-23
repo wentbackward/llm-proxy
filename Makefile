@@ -1,7 +1,12 @@
-.PHONY: build test test-short lint vet check run docker-build install-hooks
+.PHONY: build build-hardened test test-short lint lint-hardened vet check check-hardened run docker-build install-hooks
 
 build:
 	go build -o bin/llm-proxy ./cmd/llm-proxy
+
+# Hardened build strips the SIGUSR1 capture feature, log levels 3-4, and
+# the prompt text from journal entries. See docs/security.md.
+build-hardened:
+	go build -tags hardened -o bin/llm-proxy-hardened ./cmd/llm-proxy
 
 test:
 	go test ./... -v -race -count=1
@@ -20,11 +25,23 @@ lint:
 		go vet ./...; \
 	fi
 
+lint-hardened:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run --build-tags hardened ./...; \
+	else \
+		echo "golangci-lint not installed — falling back to go vet"; \
+		go vet -tags hardened ./...; \
+	fi
+
 vet:
 	go vet ./...
 
 # Run everything CI runs, in order.
 check: lint test build
+
+# Same as `check` but for the hardened build variant.
+check-hardened: lint-hardened
+	go build -tags hardened ./cmd/llm-proxy
 
 # One-time setup for contributors: point git at the version-controlled
 # .githooks/ directory so pre-commit runs golangci-lint before each commit.

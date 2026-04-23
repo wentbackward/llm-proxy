@@ -46,25 +46,10 @@ type Capture struct {
 // disk usage and what lets us store the count in an int32 with no overflow risk.
 const MaxAllowedMessages = 10000
 
-// New returns a Capture if cfg.Enabled is true AND OutputFolder is set.
-// Returns nil if the feature is not configured — that nil is safe to pass
-// around; Reserve returns nil and Arm is a no-op.
-func New(cfg Config) (*Capture, error) {
-	if !cfg.Enabled || cfg.OutputFolder == "" {
-		return nil, nil
-	}
-	if err := os.MkdirAll(cfg.OutputFolder, 0o700); err != nil {
-		return nil, fmt.Errorf("capture output_folder: %w", err)
-	}
-	m := cfg.MaxMessages
-	if m <= 0 {
-		m = DefaultMaxMessages
-	}
-	if m > MaxAllowedMessages {
-		return nil, fmt.Errorf("capture max_messages=%d exceeds maximum %d", m, MaxAllowedMessages)
-	}
-	return &Capture{outputFolder: cfg.OutputFolder, maxMessages: int32(m)}, nil
-}
+// New is implemented in separate files gated by the `hardened` build tag.
+// Non-hardened builds (default): returns a real Capture if configured.
+// Hardened builds (`-tags hardened`): always returns nil, nil — the feature
+// is compiled out entirely.
 
 // Configured reports whether the capture feature is active.
 func (c *Capture) Configured() bool { return c != nil }

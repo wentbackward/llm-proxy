@@ -25,6 +25,10 @@ func main() {
 		cfgPath = "config.yaml"
 	}
 
+	// Banner before config so operators always see which build is running,
+	// even if the config file is missing or malformed.
+	logStartupBanner()
+
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -70,7 +74,7 @@ func main() {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle(cfg.Telemetry.Prometheus.Path, metricsHandler)
 		metricsServer = &http.Server{
-			Addr:        fmt.Sprintf(":%d", cfg.Telemetry.Prometheus.Port),
+			Addr:        fmt.Sprintf("%s:%d", cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port),
 			Handler:     metricsMux,
 			ReadTimeout: 5 * time.Second,
 		}
@@ -94,8 +98,8 @@ func main() {
 
 	if metricsServer != nil {
 		go func() {
-			log.Printf("[llm-proxy] metrics on :%d%s",
-				cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
+			log.Printf("[llm-proxy] metrics on %s:%d%s",
+				cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
 			if err := metricsServer.ListenAndServe(); err != http.ErrServerClosed {
 				log.Fatalf("metrics server: %v", err)
 			}
@@ -105,10 +109,8 @@ func main() {
 	// ── Signal handling ────────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	hup := make(chan os.Signal, 1)
-	usr1 := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	signal.Notify(hup, syscall.SIGHUP)
-	signal.Notify(usr1, syscall.SIGUSR1)
 
 	go func() {
 		for range hup {
@@ -125,17 +127,9 @@ func main() {
 		}
 	}()
 
-	go func() {
-		for range usr1 {
-			c := srv.Capture()
-			if c == nil {
-				log.Println("[llm-proxy] SIGUSR1 received — message capture disabled; enable sig_message_capture in config")
-				continue
-			}
-			n := c.Arm()
-			log.Printf("[llm-proxy] SIGUSR1 received — capturing next %d requests to %s", n, c.OutputFolder())
-		}
-	}()
+	// Installs SIGUSR1 handler for the capture feature in debug builds;
+	// no-op in hardened builds (see buildmode_debug.go / buildmode_hardened.go).
+	installCaptureSignal(srv)
 
 	<-quit
 

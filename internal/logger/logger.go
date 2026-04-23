@@ -41,7 +41,10 @@ func Reload() { Apply(nil) }
 // Apply sets the log level using yamlLevel as the configured baseline,
 // with the LOG_LEVEL environment variable taking precedence when set.
 // yamlLevel may be nil (no YAML setting) or out-of-range (ignored).
-// Use this from main after config load and on SIGHUP.
+//
+// In hardened builds (-tags hardened) the final level is clamped to
+// MaxAllowedLevel (level 2 / headers), since Body and Content are no-op
+// functions that wouldn't emit regardless.
 func Apply(yamlLevel *int) {
 	l := LevelError
 	src := "default"
@@ -54,6 +57,10 @@ func Apply(yamlLevel *int) {
 			l = n
 			src = "env"
 		}
+	}
+	if l > MaxAllowedLevel {
+		log.Printf("[logger] level %d requested but clamped to %d (hardened build strips body/content logging)", l, MaxAllowedLevel)
+		l = MaxAllowedLevel
 	}
 	current.Store(int32(l))
 	log.Printf("[logger] log level %d (%s)", l, src)
@@ -76,16 +83,7 @@ func Headers(format string, args ...interface{}) {
 	}
 }
 
-// Body logs at level 3.
-func Body(format string, args ...interface{}) {
-	if Get() >= LevelBody {
-		log.Printf("[body] "+format, args...)
-	}
-}
-
-// Content logs at level 4.
-func Content(format string, args ...interface{}) {
-	if Get() >= LevelContent {
-		log.Printf(format, args...)
-	}
-}
+// Body and Content are implemented in separate files gated by build tag:
+//
+//	!hardened (default): Body prints at level 3+, Content at level 4+
+//	hardened:            both are no-ops, compiled out

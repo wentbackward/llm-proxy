@@ -34,12 +34,14 @@ type ServerConfig struct {
 	APIKey              string          `yaml:"api_key"`              // required bearer token for inbound requests
 	PassthroughUnrouted bool            `yaml:"passthrough_unrouted"` // false = reject unknown models; true = forward to first backend
 	LogLevel            *int            `yaml:"log_level"`            // 0-4 (see internal/logger); LOG_LEVEL env wins when set
+	MaxRequestBodyMB    int             `yaml:"max_request_body_mb"`  // hard cap per request body; default 50, 0 means use default
 	TLS                 TLSConfig       `yaml:"tls"`
 	Transport           TransportConfig `yaml:"transport"`
 }
 
 type PrometheusConfig struct {
 	Enabled bool   `yaml:"enabled"`
+	Host    string `yaml:"host"` // bind address; default 127.0.0.1 (localhost-only, no auth on metrics)
 	Port    int    `yaml:"port"`
 	Path    string `yaml:"path"`
 }
@@ -241,11 +243,19 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.Transport.IdleConnTimeout == 0 {
 		cfg.Server.Transport.IdleConnTimeout = 120
 	}
+	if cfg.Server.MaxRequestBodyMB == 0 {
+		cfg.Server.MaxRequestBodyMB = 50
+	}
 	if cfg.Telemetry.Prometheus.Port == 0 {
 		cfg.Telemetry.Prometheus.Port = 9091
 	}
 	if cfg.Telemetry.Prometheus.Path == "" {
 		cfg.Telemetry.Prometheus.Path = "/metrics"
+	}
+	if cfg.Telemetry.Prometheus.Host == "" {
+		// Default to localhost. Metrics have no auth; explicit opt-in required
+		// for network exposure.
+		cfg.Telemetry.Prometheus.Host = "127.0.0.1"
 	}
 	for i := range cfg.Backends {
 		if cfg.Backends[i].TimeoutSeconds == 0 {

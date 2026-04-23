@@ -1143,6 +1143,132 @@ func listCaptureFiles(t *testing.T, dir string) []string {
 	return out
 }
 
+// ── Hardening: bearer auth and body-size cap ─────────────────────────────────
+
+func TestBearerAuth_RejectsWrongKey(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	cfg := s.Config()
+	cfg.Server.APIKey = "correct-key"
+	s.Reload(cfg)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer wrong-key")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler := s.bearerAuth(s.handleProxy)
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong key should return 401, got %d", rec.Code)
+	}
+	if rec.Header().Get("WWW-Authenticate") == "" {
+		t.Error("401 should include WWW-Authenticate header")
+	}
+}
+
+func TestBearerAuth_AcceptsCorrectKey(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	cfg := s.Config()
+	cfg.Server.APIKey = "correct-key"
+	s.Reload(cfg)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer correct-key")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler := s.bearerAuth(s.handleProxy)
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("correct key should return 200, got %d", rec.Code)
+	}
+}
+
+func TestBearerAuth_EmptyKeyDisablesAuth(t *testing.T) {
+	// api_key: "" in config = no auth — verify a request with no header still goes through.
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler := s.bearerAuth(s.handleProxy)
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("empty api_key should disable auth, got %d", rec.Code)
+	}
+}
+
+func TestMaxRequestBody_RejectsOversize(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	cfg := s.Config()
+	cfg.Server.MaxRequestBodyMB = 1 // 1 MB cap
+	s.Reload(cfg)
+
+	// 2 MB body (over the 1 MB cap)
+	bigContent := strings.Repeat("A", 2*1024*1024)
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": bigContent}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	s.handleProxy(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversize body should return 413, got %d", rec.Code)
+	}
+}
+
+func TestMaxRequestBody_AcceptsUnderLimit(t *testing.T) {
+	s, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	cfg := s.Config()
+	cfg.Server.MaxRequestBodyMB = 10
+	s.Reload(cfg)
+
+	// 100 KB body — comfortably under 10 MB
+	content := strings.Repeat("A", 100*1024)
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":    "test-model",
+		"messages": []interface{}{map[string]interface{}{"role": "user", "content": content}},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	s.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("under-limit body should return 200, got %d", rec.Code)
+	}
+}
+
 func sendChat(t *testing.T, s *Server, model string, wantStatus int) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]interface{}{

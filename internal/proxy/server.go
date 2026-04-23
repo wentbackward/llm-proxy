@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -186,10 +188,17 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 // bearerAuth wraps a handler with bearer token authentication.
 // Checks the current config on each request so api_key changes take effect on reload.
+// The compare is constant-time to avoid leaking the token via response timing.
 func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := s.cfg.Load().Server.APIKey
-		if key != "" && r.Header.Get("Authorization") != "Bearer "+key {
+		if key == "" {
+			next(w, r)
+			return
+		}
+		expected := []byte("Bearer " + key)
+		got := []byte(r.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(got, expected) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-proxy"`)
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -275,9 +284,18 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	rid := requestID()
 
 	// ── Read & parse body ──────────────────────────────────────────────────
+	// Cap request body size to avoid OOM on a malicious/misbehaving client.
+	if maxMB := s.cfg.Load().Server.MaxRequestBodyMB; maxMB > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, int64(maxMB)*1024*1024)
+	}
 	rawBody, err := io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			jsonError(w, fmt.Sprintf("request body exceeds max_request_body_mb limit (%d MB)", s.cfg.Load().Server.MaxRequestBodyMB), http.StatusRequestEntityTooLarge)
+			return
+		}
 		jsonError(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}

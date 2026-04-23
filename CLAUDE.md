@@ -32,6 +32,15 @@ Do NOT tag without explicit user confirmation. Never say "the pipeline will pick
 
 Versioning convention: patch bumps for features and fixes alike in the pre-1.0 series.
 
+## Hardened build
+
+Two build variants gated by the `hardened` Go build tag:
+
+- **Default (`make build`)**: all features, including SIGUSR1 message capture, log levels 3-4, and the prompt text fields in journal entries.
+- **Hardened (`make build-hardened`, `go build -tags hardened`)**: above three features are compiled out — not runtime-disabled, removed from the binary. Structural telemetry stays.
+
+When adding new code that touches any of those three feature areas, split across build-tag files using the existing pattern (see `internal/capture/new_debug.go` + `new_hardened.go`, `internal/logger/level_*.go`, `internal/journal/text_*.go`, `cmd/llm-proxy/buildmode_*.go`). The `hardened` file always has the stripped/no-op implementation. Run `make check-hardened` to verify the hardened variant still builds and lints cleanly.
+
 ## Protocol rule
 
 The proxy does NOT translate between OpenAI and Anthropic protocols. A client speaking OpenAI chat completions can only reach `openai`-type backends; Anthropic messages clients can only reach `anthropic`-type backends. Do not add bidirectional translation without explicit scope from the user.

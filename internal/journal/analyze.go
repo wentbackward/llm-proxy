@@ -55,7 +55,9 @@ func Analyze(body map[string]interface{}, protocol string) Entry {
 	if sys, ok := body["system"].(string); ok {
 		e.SystemChars = len(sys)
 		e.TotalChars += len(sys)
-		e.SystemText = truncate(sys, maxSystemText)
+		if captureMessageText {
+			e.SystemText = truncate(sys, maxSystemText)
+		}
 		e.CodeFences += countCodeFences(sys)
 		e.JSONBlocks += countJSONBlocks(sys)
 	}
@@ -80,10 +82,14 @@ func Analyze(body map[string]interface{}, protocol string) Entry {
 		switch role {
 		case "system":
 			e.SystemChars += chars
-			e.SystemText = truncate(text, maxSystemText)
+			if captureMessageText {
+				e.SystemText = truncate(text, maxSystemText)
+			}
 		case "user":
 			e.LastUserChars = chars
-			e.LastUserText = truncate(text, maxLastUserText)
+			if captureMessageText {
+				e.LastUserText = truncate(text, maxLastUserText)
+			}
 		}
 
 		e.CodeFences += countCodeFences(text)

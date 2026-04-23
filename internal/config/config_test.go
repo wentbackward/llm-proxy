@@ -207,6 +207,48 @@ backends:
 	}
 }
 
+func TestDefault_MaxRequestBodyMB(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+`)
+	cfg, _ := Load(path)
+	if cfg.Server.MaxRequestBodyMB != 50 {
+		t.Errorf("default max_request_body_mb: got %d, want 50", cfg.Server.MaxRequestBodyMB)
+	}
+}
+
+func TestDefault_PrometheusHostLocalhost(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+`)
+	cfg, _ := Load(path)
+	if cfg.Telemetry.Prometheus.Host != "127.0.0.1" {
+		t.Errorf("prometheus.host default: got %q, want 127.0.0.1 (metrics have no auth; localhost-only by default)", cfg.Telemetry.Prometheus.Host)
+	}
+}
+
+func TestExplicit_PrometheusHostOverride(t *testing.T) {
+	path := writeTemp(t, `
+telemetry:
+  prometheus:
+    host: "0.0.0.0"
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+`)
+	cfg, _ := Load(path)
+	if cfg.Telemetry.Prometheus.Host != "0.0.0.0" {
+		t.Errorf("explicit host should override default, got %q", cfg.Telemetry.Prometheus.Host)
+	}
+}
+
 func TestDefaultTimeout(t *testing.T) {
 	path := writeTemp(t, `
 backends:
