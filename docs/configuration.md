@@ -46,9 +46,15 @@ Clients connect to `https://spark-01.your-tailnet.ts.net:4000/v1`.
 
 ## Backends
 
-Each backend is an upstream LLM provider. The `type` determines auth header format and SSE parsing — `openai` for OpenAI-compatible APIs, `anthropic` for Anthropic's Messages API.
+Each backend is an upstream LLM provider. The `type` determines auth header format and stream parsing — `openai` for OpenAI-compatible APIs, `anthropic` for Anthropic's Messages API, `ollama` for Ollama's native `/api/*` endpoints.
 
-**Important:** The proxy does not translate between protocols. A client sending OpenAI format (`/v1/chat/completions`) can only route to an `openai`-type backend. A client sending Anthropic format (`/v1/messages`) can only route to an `anthropic`-type backend. Most clients (OpenWebUI, Continue, Cline, etc.) speak OpenAI format.
+**Important:** The proxy does not translate between protocols. Three isolated lanes:
+
+- OpenAI format (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) → `openai` backends
+- Anthropic format (`/v1/messages`) → `anthropic` backends
+- Ollama native (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) → `ollama` backends
+
+Most clients (OpenWebUI, Continue, Cline, etc.) speak OpenAI format; Claude Code speaks Anthropic; tools that expect Ollama's native protocol speak Ollama.
 
 ```yaml
 backends:
@@ -63,6 +69,11 @@ backends:
     base_url: "https://api.anthropic.com"
     api_key: "${ANTHROPIC_API_KEY}"
     skip_probe: true              # cloud APIs don't expose /v1/models
+
+  - id: ollama
+    type: ollama
+    base_url: "http://localhost:11434"
+    timeout_seconds: 300
 ```
 
 - **`type`** — `openai`, `anthropic`, or `ollama`. Determines auth header format, stream parsing, and `enable_thinking` translation. Must match the protocol the client speaks: OpenAI format (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) routes to `openai` backends; Anthropic format (`/v1/messages`) routes to `anthropic` backends; Ollama-native format (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) routes to `ollama` backends.
@@ -85,6 +96,44 @@ backends:
     # also: ports: [4000, 4005]   # explicit list
 ```
 
+### Ollama backends
+
+`type: ollama` routes the following endpoints to the backend unchanged:
+
+| Path | Purpose |
+|---|---|
+| `/api/chat` | chat completion (streaming by default) |
+| `/api/generate` | prompt completion (streaming by default) |
+| `/api/embed` | embeddings (newer path) |
+| `/api/embeddings` | embeddings (legacy path) |
+| `/api/tags` | model list, forwarded to the first `ollama` backend |
+
+Example:
+
+```yaml
+backends:
+  - id: ollama
+    type: ollama
+    base_url: "http://localhost:11434"
+    timeout_seconds: 300
+
+routes:
+  - virtual_model: llama3
+    backend: ollama
+    real_model: "llama3:8b"
+    defaults:
+      temperature: 0.7     # lands at body.options.temperature
+      num_ctx: 8192        # ditto
+    clamp:
+      temperature: 0.7     # caller cannot override
+```
+
+**Nested options.** Ollama expects sampling parameters under `"options"` in the request body — `{"model": "...", "options": {"temperature": 0.7}}`, not `{"temperature": 0.7}` at the top level. Routes' `defaults` and `clamp` are declared flat (as with `openai` / `anthropic`), and the proxy handles the flatten/re-nest transparently. Precedence is the same: `defaults < caller's options < clamp`.
+
+**No translation.** The proxy does not reshape messages, and does not translate between Ollama's `/api/chat` and OpenAI's `/v1/chat/completions` — a client speaking Ollama native can only reach `ollama` backends, and vice versa. If you point an OpenAI-speaking client at a non-TLS Ollama endpoint, configure it against Ollama's own OpenAI-compat layer (`http://host:11434/v1`) as a `type: openai` backend, at the cost of Ollama's implicit re-interpretation of temperature and system prompt.
+
+**Metrics.** Request count, duration, active-requests gauge, and TTFT are all recorded. Token counts (`prompt_eval_count` / `eval_count`) are embedded in Ollama's NDJSON stream and not parsed in this release.
+
 ### Authentication
 
 The default auth header format matches each provider's convention:
@@ -93,6 +142,7 @@ The default auth header format matches each provider's convention:
 |---|---|---|
 | `openai` | `bearer` | `Authorization: Bearer <key>` |
 | `anthropic` | `x-api-key` | `x-api-key: <key>` |
+| `ollama` | `bearer` | `Authorization: Bearer <key>` (if `api_key` set; Ollama itself usually doesn't require auth) |
 
 Override `auth_type` when the default doesn't match your provider's expectations:
 
