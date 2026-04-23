@@ -1,4 +1,4 @@
-.PHONY: build test lint run docker-build
+.PHONY: build test test-short lint vet check run docker-build install-hooks
 
 build:
 	go build -o bin/llm-proxy ./cmd/llm-proxy
@@ -9,8 +9,28 @@ test:
 test-short:
 	go test ./... -short
 
+# Full lint. Falls back to `go vet` if golangci-lint isn't installed so CI and
+# local still get basic checks. To match CI exactly, install golangci-lint:
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 lint:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not installed — falling back to go vet"; \
+		go vet ./...; \
+	fi
+
+vet:
 	go vet ./...
+
+# Run everything CI runs, in order.
+check: lint test build
+
+# One-time setup for contributors: point git at the version-controlled
+# .githooks/ directory so pre-commit runs golangci-lint before each commit.
+install-hooks:
+	git config core.hooksPath .githooks
+	@echo "pre-commit hook installed (.githooks/pre-commit)"
 
 run:
 	CONFIG_PATH=config.example.yaml go run ./cmd/llm-proxy

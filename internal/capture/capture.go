@@ -38,9 +38,13 @@ type Config struct {
 // A nil *Capture is safe at every call site.
 type Capture struct {
 	outputFolder string
-	maxMessages  int
+	maxMessages  int32 // bounded at construction so atomic.Int32 operations are always safe
 	remaining    atomic.Int32
 }
+
+// MaxAllowedMessages is the upper bound for MaxMessages — both a sanity cap on
+// disk usage and what lets us store the count in an int32 with no overflow risk.
+const MaxAllowedMessages = 10000
 
 // New returns a Capture if cfg.Enabled is true AND OutputFolder is set.
 // Returns nil if the feature is not configured — that nil is safe to pass
@@ -52,11 +56,14 @@ func New(cfg Config) (*Capture, error) {
 	if err := os.MkdirAll(cfg.OutputFolder, 0o700); err != nil {
 		return nil, fmt.Errorf("capture output_folder: %w", err)
 	}
-	max := cfg.MaxMessages
-	if max <= 0 {
-		max = DefaultMaxMessages
+	m := cfg.MaxMessages
+	if m <= 0 {
+		m = DefaultMaxMessages
 	}
-	return &Capture{outputFolder: cfg.OutputFolder, maxMessages: max}, nil
+	if m > MaxAllowedMessages {
+		return nil, fmt.Errorf("capture max_messages=%d exceeds maximum %d", m, MaxAllowedMessages)
+	}
+	return &Capture{outputFolder: cfg.OutputFolder, maxMessages: int32(m)}, nil
 }
 
 // Configured reports whether the capture feature is active.
@@ -75,7 +82,7 @@ func (c *Capture) MaxMessages() int {
 	if c == nil {
 		return 0
 	}
-	return c.maxMessages
+	return int(c.maxMessages)
 }
 
 // Arm opens a capture window for the next MaxMessages requests. Calling Arm
@@ -84,8 +91,8 @@ func (c *Capture) Arm() int {
 	if c == nil {
 		return 0
 	}
-	c.remaining.Store(int32(c.maxMessages))
-	return c.maxMessages
+	c.remaining.Store(c.maxMessages)
+	return int(c.maxMessages)
 }
 
 // Reserve atomically claims one capture slot. Returns nil if the window is
@@ -100,8 +107,8 @@ func (c *Capture) Reserve() *Slot {
 			return nil
 		}
 		if c.remaining.CompareAndSwap(n, n-1) {
-			seq := c.maxMessages - int(n) + 1
-			return &Slot{folder: c.outputFolder, seq: seq, total: c.maxMessages}
+			seq := int(c.maxMessages - n + 1)
+			return &Slot{folder: c.outputFolder, seq: seq, total: int(c.maxMessages)}
 		}
 	}
 }
@@ -176,7 +183,7 @@ func (s *Slot) Write(p Payload) error {
 		return fmt.Errorf("write capture: %w", err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("rename capture: %w", err)
 	}
 	log.Printf("[capture] wrote %s (%d/%d)", fname, s.seq, s.total)

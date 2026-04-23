@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: run golangci-lint on the whole module.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# To skip (not recommended): git commit --no-verify
+set -euo pipefail
+
+if ! command -v golangci-lint >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+pre-commit: golangci-lint not found on PATH.
+
+Install with:
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+Or bypass this hook once with:  git commit --no-verify
+EOF
+    exit 1
+fi
+
+echo "pre-commit: running golangci-lint..."
+golangci-lint run ./...

@@ -12,7 +12,7 @@ import (
 var samplingKeys = map[string]bool{
 	"temperature": true, "top_p": true, "top_k": true,
 	"max_tokens": true, "max_completion_tokens": true,
-	"presence_penalty": true,
+	"presence_penalty":  true,
 	"frequency_penalty": true, "seed": true, "stop": true,
 	"enable_thinking": true, "thinking_budget": true,
 }
@@ -83,7 +83,7 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 }
 
 // mergeParams applies the three-layer merge: defaults < caller < clamp.
-func mergeParams(defaults map[string]interface{}, body map[string]interface{}, clamp map[string]interface{}) map[string]interface{} {
+func mergeParams(defaults, body, clamp map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(defaults)+len(clamp))
 
 	for k, v := range defaults {

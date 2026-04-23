@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	maxSystemText   = 2048  // 2KB cap for system prompt
-	maxLastUserText = 8192  // 8KB cap for last user message
+	maxSystemText   = 2048 // 2KB cap for system prompt
+	maxLastUserText = 8192 // 8KB cap for last user message
 )
 
 // Entry holds the analysis of a single proxy request.
@@ -126,12 +126,12 @@ func countCodeFences(text string) int {
 	return count / 2
 }
 
-// truncate returns s capped at max bytes. If truncated, appends "[truncated]".
-func truncate(s string, max int) string {
-	if len(s) <= max {
+// truncate returns s capped at maxBytes. If truncated, appends "[truncated]".
+func truncate(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
 		return s
 	}
-	return s[:max] + "[truncated]"
+	return s[:maxBytes] + "[truncated]"
 }
 
 // countJSONBlocks counts code-fenced json blocks with > 50 chars of content.

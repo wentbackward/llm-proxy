@@ -42,8 +42,8 @@ type Server struct {
 	journal *journal.Journal                // nil if journal disabled
 	capture atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
 
-	transport  *http.Transport        // shared connection pool for all backends
-	mu         sync.RWMutex           // guards semaphores
+	transport  *http.Transport          // shared connection pool for all backends
+	mu         sync.RWMutex             // guards semaphores
 	semaphores map[string]chan struct{} // per-backend concurrency limiter (nil entry = unlimited)
 }
 
@@ -102,7 +102,8 @@ func (s *Server) Reload(cfg *config.Config) {
 	s.buildSemaphores(cfg)
 	s.applyCaptureConfig(cfg)
 	log.Printf("[reload] %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
-	for _, b := range cfg.Backends {
+	for i := range cfg.Backends {
+		b := &cfg.Backends[i]
 		conc := "unlimited"
 		if b.MaxConcurrency > 0 {
 			conc = fmt.Sprintf("max=%d", b.MaxConcurrency)
@@ -131,7 +132,8 @@ func (s *Server) Reload(cfg *config.Config) {
 // Backends without max_concurrency get no entry (unlimited).
 func (s *Server) buildSemaphores(cfg *config.Config) {
 	sems := make(map[string]chan struct{}, len(cfg.Backends))
-	for _, b := range cfg.Backends {
+	for i := range cfg.Backends {
+		b := &cfg.Backends[i]
 		if b.MaxConcurrency > 0 {
 			sems[b.ID] = make(chan struct{}, b.MaxConcurrency)
 		}
@@ -142,8 +144,8 @@ func (s *Server) buildSemaphores(cfg *config.Config) {
 }
 
 // acquireSemaphore blocks until a slot is available for the given backend,
-// or the request context is cancelled. Returns a release function and true,
-// or nil and false if the context was cancelled while waiting.
+// or the request context is canceled. Returns a release function and true,
+// or nil and false if the context was canceled while waiting.
 func (s *Server) acquireSemaphore(ctx context.Context, backendID string) (release func(), ok bool) {
 	s.mu.RLock()
 	sem := s.semaphores[backendID]
@@ -173,7 +175,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("/v1/models", auth(s.handleModels))
 	mux.HandleFunc("/v1/chat/completions", auth(s.handleProxy))
@@ -210,7 +212,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	if backend := cfg.DefaultBackend(); backend != nil {
 		upURL := backend.BaseURL + "/v1/models"
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, nil)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, http.NoBody)
 		if err == nil {
 			if backend.APIKey != "" {
 				req.Header.Set("Authorization", "Bearer "+backend.APIKey)
@@ -218,11 +220,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			resp, err := http.DefaultClient.Do(req)
 			if err == nil {
 				data, readErr := io.ReadAll(resp.Body)
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				if resp.StatusCode == http.StatusOK && readErr == nil {
 					rewritten := s.rewriteModelsResponse(data, cfg)
 					w.Header().Set("Content-Type", "application/json")
-					w.Write(rewritten)
+					_, _ = w.Write(rewritten)
 					return
 				}
 			}
@@ -250,10 +252,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": data})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": data})
 }
 
-// proxyOpts controls per-endpoint behaviour differences in the shared proxy pipeline.
+// proxyOpts controls per-endpoint behavior differences in the shared proxy pipeline.
 type proxyOpts struct {
 	pathOverride string // if set, forces the backend request path (e.g. "/v1/completions")
 	protocol     string // if set, skips auto-detection (e.g. "openai" for completions)
@@ -274,7 +276,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	// ── Read & parse body ──────────────────────────────────────────────────
 	rawBody, err := io.ReadAll(r.Body)
-	r.Body.Close()
+	_ = r.Body.Close()
 	if err != nil {
 		jsonError(w, "failed to read request body", http.StatusBadRequest)
 		return
@@ -371,7 +373,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	// ── L4: log full message content ───────────────────────────────────────
 	if logger.Get() >= logger.LevelContent {
-		logMessageContent(rid, body, protocol)
+		logMessageContent(rid, body)
 	}
 
 	// ── Journal: emit structured analysis ──────────────────────────────────
@@ -427,9 +429,9 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	defer release()
 
 	rp := &httputil.ReverseProxy{
-		Transport: s.transport,
-		Director:  director(targetURL, backend, newBody, protocol, opts.pathOverride),
-		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx),
+		Transport:      s.transport,
+		Director:       director(targetURL, backend, newBody, opts.pathOverride),
+		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
@@ -552,7 +554,7 @@ func safeHeaders(h http.Header) map[string]string {
 // director returns an httputil.ReverseProxy Director that rewrites the request
 // for the given backend. If pathOverride is non-empty, it replaces the request
 // path (used by /v1/completions to force the backend path).
-func director(target *url.URL, backend *config.Backend, body []byte, protocol, pathOverride string) func(*http.Request) {
+func director(target *url.URL, backend *config.Backend, body []byte, pathOverride string) func(*http.Request) {
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
@@ -595,7 +597,7 @@ func director(target *url.URL, backend *config.Backend, body []byte, protocol, p
 }
 
 // logMessageContent logs full text content of each message at L4.
-func logMessageContent(rid string, body map[string]interface{}, protocol string) {
+func logMessageContent(rid string, body map[string]interface{}) {
 	// OpenAI: messages[].content (string or array of content blocks)
 	// Anthropic: system (string) + messages[].content (string or array)
 	if sys, ok := body["system"].(string); ok && sys != "" {
@@ -689,7 +691,7 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 		} else {
 			// Non-streaming: buffer to extract usage, then restore.
 			data, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if err != nil {
 				if capCtx != nil {
 					capCtx.finishError(t0, fmt.Sprintf("read upstream body: %v", err))
@@ -960,8 +962,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]string{"message": msg, "type": "proxy_error"},
 	})
 }
-

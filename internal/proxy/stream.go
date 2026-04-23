@@ -27,9 +27,9 @@ type sseParser struct {
 	metrics     *telemetry.Metrics
 	ctx         context.Context
 
-	ttftDone    bool
-	t0FirstTok  time.Time // when first content token arrived (for gen speed)
-	lineBuf     []byte    // holds a partial line between Read calls
+	ttftDone   bool
+	t0FirstTok time.Time // when first content token arrived (for gen speed)
+	lineBuf    []byte    // holds a partial line between Read calls
 
 	// Token accumulation
 	promptToks     int64
@@ -157,9 +157,10 @@ func (p *sseParser) handleAnthropicEvent(evt map[string]interface{}) {
 			// Accumulate content/think chars for think ratio
 			text, _ := delta["text"].(string)
 			think, _ := delta["thinking"].(string)
-			if dtype == "thinking_delta" {
+			switch dtype {
+			case "thinking_delta":
 				p.thinkChars += int64(len(think))
-			} else if dtype == "text_delta" {
+			case "text_delta":
 				p.contentChars += int64(len(text))
 				p.appendContent(text)
 			}
@@ -353,7 +354,7 @@ func (b *idleTimeoutBody) Read(p []byte) (int, error) {
 		return n, r.err
 	case <-b.timer.C:
 		// Close underlying reader to unblock readLoop goroutine
-		b.rc.Close()
+		_ = b.rc.Close()
 		return 0, fmt.Errorf("backend idle timeout (%s)", b.timeout)
 	}
 }
@@ -384,7 +385,7 @@ func (b *interceptedBody) Read(p []byte) (n int, err error) {
 	if n > 0 {
 		b.parser.feed(p[:n])
 		if b.tee != nil {
-			b.tee.Write(p[:n])
+			_, _ = b.tee.Write(p[:n])
 		}
 	}
 	return

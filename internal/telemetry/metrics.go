@@ -1,4 +1,4 @@
-// Package telemetry initialises OpenTelemetry metrics with a Prometheus exporter.
+// Package telemetry initializes OpenTelemetry metrics with a Prometheus exporter.
 package telemetry
 
 import (

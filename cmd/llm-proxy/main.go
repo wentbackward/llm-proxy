@@ -127,13 +127,13 @@ func main() {
 
 	go func() {
 		for range usr1 {
-			cap := srv.Capture()
-			if cap == nil {
+			c := srv.Capture()
+			if c == nil {
 				log.Println("[llm-proxy] SIGUSR1 received — message capture disabled; enable sig_message_capture in config")
 				continue
 			}
-			n := cap.Arm()
-			log.Printf("[llm-proxy] SIGUSR1 received — capturing next %d requests to %s", n, cap.OutputFolder())
+			n := c.Arm()
+			log.Printf("[llm-proxy] SIGUSR1 received — capturing next %d requests to %s", n, c.OutputFolder())
 		}
 	}()
 
@@ -143,12 +143,18 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	proxyServer.Shutdown(ctx)
+	if err := proxyServer.Shutdown(ctx); err != nil {
+		log.Printf("[llm-proxy] proxy shutdown: %v", err)
+	}
 	if metricsServer != nil {
-		metricsServer.Shutdown(ctx)
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			log.Printf("[llm-proxy] metrics shutdown: %v", err)
+		}
 	}
 	if j != nil {
-		j.Shutdown(ctx)
+		if err := j.Shutdown(ctx); err != nil {
+			log.Printf("[llm-proxy] journal shutdown: %v", err)
+		}
 	}
 }
 
@@ -171,7 +177,8 @@ func probeBackends(cfg *config.Config) {
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	for _, b := range cfg.Backends {
+	for i := range cfg.Backends {
+		b := &cfg.Backends[i]
 		if b.SkipProbe {
 			log.Printf("[probe] backend %-12s SKIPPED (skip_probe: true)", b.ID)
 			logVirtualModels(byBackend[b.ID])
@@ -179,7 +186,7 @@ func probeBackends(cfg *config.Config) {
 		}
 
 		probeURL := b.BaseURL + "/v1/models"
-		req, err := http.NewRequest(http.MethodGet, probeURL, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, probeURL, http.NoBody)
 		if err != nil {
 			log.Printf("[probe] backend %-12s ERROR building request: %v", b.ID, err)
 			continue
@@ -196,21 +203,21 @@ func probeBackends(cfg *config.Config) {
 		}
 
 		if resp.StatusCode == http.StatusNotFound {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			log.Printf("[probe] backend %-12s OK  (no /v1/models endpoint)", b.ID)
 			logVirtualModels(byBackend[b.ID])
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			log.Printf("[probe] backend %-12s HTTP %d", b.ID, resp.StatusCode)
 			logVirtualModels(byBackend[b.ID])
 			continue
 		}
 
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		var result struct {
 			Data []struct {
 				ID string `json:"id"`

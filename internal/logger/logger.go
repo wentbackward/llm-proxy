@@ -1,4 +1,4 @@
-// Package logger provides levelled logging with runtime level changes via SIGHUP.
+// Package logger provides leveled logging with runtime level changes via SIGHUP.
 //
 // Levels:
 //

@@ -6,11 +6,14 @@ Short reference for agents working in this repo. For full docs see `docs/`.
 
 ```
 make build     # go build -o bin/llm-proxy ./cmd/llm-proxy
-make test      # go test ./... -count=1
-go vet ./...
+make test      # go test ./... -race -count=1
+make lint      # golangci-lint run ./...
+make check     # lint + test + build, everything CI runs
 ```
 
-Run `make test` (not just the package you changed) before declaring work done — tests in `internal/proxy` and `internal/capture` cover cross-package wiring.
+Run `make check` (not just the package you changed) before declaring work done — tests in `internal/proxy` and `internal/capture` cover cross-package wiring, and `golangci-lint` is wired into CI.
+
+The linter config is tuned for this repo (`.golangci.yml`, v2 schema). Do NOT reintroduce `errcheck.check-type-assertions: true` or `check-blank: true` — the codebase uses `x, _ := m[k].(T)` idiomatically for best-effort JSON parsing, and we've silenced that pattern deliberately.
 
 ## Releases ship by tag, NOT by merge
 

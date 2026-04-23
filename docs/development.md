@@ -33,10 +33,27 @@ docs/                   Documentation
 ```bash
 make test             # go test ./... -v -race -count=1
 make test-short       # go test ./... -short
-make lint             # go vet ./...
+make lint             # golangci-lint run ./... (falls back to go vet if missing)
+make check            # lint + test + build, everything CI runs
 ```
 
 Tests cover config loading/validation, routing/parameter merge, SSE parsing (OpenAI + Anthropic), completions endpoint (streaming, non-streaming, error handling, no-content-injection), message analysis, and logger level thresholds.
+
+### Linting
+
+The linter config is in `.golangci.yml` (v2 schema). To install locally:
+
+```bash
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+```
+
+A pre-commit hook at `.githooks/pre-commit` runs `golangci-lint` before every commit. It's version-controlled but opt-in; enable once per clone:
+
+```bash
+make install-hooks    # git config core.hooksPath .githooks
+```
+
+Bypass with `git commit --no-verify` if you need to (don't make a habit of it — CI will reject the push).
 
 ## Docker
 

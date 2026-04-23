@@ -28,10 +28,10 @@ type capturedRequest struct {
 
 // newTestServer creates a Server with a fake backend that captures the
 // forwarded request and returns a canned response based on the endpoint hit.
-func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.Server) {
+func newTestServer(t *testing.T, capture *capturedRequest) (srv *Server, backend *httptest.Server) {
 	t.Helper()
 
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		var body map[string]interface{}
 		json.Unmarshal(raw, &body)
@@ -42,7 +42,8 @@ func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.S
 
 		isStreaming, _ := body["stream"].(bool)
 
-		if r.URL.Path == "/v1/embeddings" {
+		switch r.URL.Path {
+		case "/v1/embeddings":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"object": "list",
@@ -56,7 +57,7 @@ func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.S
 				},
 				"usage": map[string]interface{}{"prompt_tokens": 5, "total_tokens": 5},
 			})
-		} else if r.URL.Path == "/v1/completions" {
+		case "/v1/completions":
 			if isStreaming {
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.Header().Set("Cache-Control", "no-cache")
@@ -91,7 +92,7 @@ func newTestServer(t *testing.T, capture *capturedRequest) (*Server, *httptest.S
 					},
 				})
 			}
-		} else {
+		default:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":     "chatcmpl-test",
@@ -249,7 +250,7 @@ func TestCompletions_MethodNotAllowed(t *testing.T) {
 	s, backend := newTestServer(t, nil)
 	defer backend.Close()
 
-	req := httptest.NewRequest("GET", "/v1/completions", nil)
+	req := httptest.NewRequest("GET", "/v1/completions", http.NoBody)
 	rec := httptest.NewRecorder()
 	s.handleCompletions(rec, req)
 
@@ -597,10 +598,7 @@ func TestSemaphore_LimitsConcurrency(t *testing.T) {
 
 	// Wait for 2 to be in-flight (the semaphore limit)
 	deadline := time.After(2 * time.Second)
-	for {
-		if inflight.Load() >= 2 {
-			break
-		}
+	for inflight.Load() < 2 {
 		select {
 		case <-deadline:
 			t.Fatalf("timed out waiting for 2 in-flight requests, got %d", inflight.Load())
@@ -629,11 +627,11 @@ func TestSemaphore_ContextCancellation(t *testing.T) {
 	s.semaphores["full"] <- struct{}{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled
+	cancel() // already canceled
 
 	_, ok := s.acquireSemaphore(ctx, "full")
 	if ok {
-		t.Error("acquireSemaphore should fail when context is cancelled")
+		t.Error("acquireSemaphore should fail when context is canceled")
 	}
 }
 
@@ -809,7 +807,7 @@ func TestEmbeddings_MethodNotAllowed(t *testing.T) {
 	s, backend := newTestServer(t, nil)
 	defer backend.Close()
 
-	req := httptest.NewRequest("GET", "/v1/embeddings", nil)
+	req := httptest.NewRequest("GET", "/v1/embeddings", http.NoBody)
 	rec := httptest.NewRecorder()
 	s.handleEmbeddings(rec, req)
 
@@ -967,11 +965,11 @@ func TestCapture_NonStreamingWritesFile(t *testing.T) {
 	}
 	s.Reload(cfg)
 
-	cap := s.Capture()
-	if cap == nil {
+	c := s.Capture()
+	if c == nil {
 		t.Fatal("capture should be enabled after reload")
 	}
-	cap.Arm()
+	c.Arm()
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":    "test-model",

@@ -1,0 +1,191 @@
+# golangci-lint configuration for llm-proxy
+# Tuned for golangci-lint v2.x.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - forbidigo
+    - nolintlint
+    - depguard
+
+    # --- Essentials ---
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+
+    # --- Recommended additions ---
+    - revive
+    - gocritic
+    - bodyclose
+    - errorlint
+    - noctx
+
+    # --- Project-dependent ---
+    - gosec
+    - prealloc
+    - misspell
+    - unconvert
+    - nilerr
+    - contextcheck
+    - unparam
+
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: '^ioutil\.'
+          msg: use io / os helpers instead of deprecated ioutil
+
+    depguard:
+      rules:
+        main:
+          files:
+            - $all
+          allow:
+            - $gostd
+            - github.com/wentbackward/llm-proxy
+            - gopkg.in/yaml.v3
+            - go.opentelemetry.io
+            - github.com/prometheus/client_golang
+          deny:
+            - pkg: io/ioutil
+              desc: deprecated since Go 1.16; use io or os
+
+    errcheck:
+      # type assertions like `x, _ := m[k].(string)` are idiomatic here for
+      # best-effort JSON parsing against maps of known-but-not-guaranteed
+      # shape — a missing/wrong-typed value falls through to a zero-value
+      # branch that we already handle. Flagging them all is noise.
+      check-type-assertions: false
+      check-blank: false
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+    staticcheck:
+      checks: ["all"]
+
+    revive:
+      severity: warning
+      # Intentionally omitted: exported, package-comments —
+      # too noisy for internal packages in this repo.
+      # Intentionally omitted: context-as-argument — our internal helpers take
+      # ctx later in the param list for readability; reordering is a big diff
+      # for no runtime effect.
+      rules:
+        - name: blank-imports
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - opinionated
+      disabled-checks:
+        - ifElseChain
+        - hugeParam
+        - commentedOutCode
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    gosec:
+      # G104: unhandled errors — errcheck already covers this.
+      # G301/G306: directory/file permissions — capture feature
+      #   picks 0o700/0o600 deliberately.
+      # G304: file inclusion via variable — config.Load reads a
+      #   user-supplied path; that's its whole job.
+      # G706: log injection via taint — we log trusted internal
+      #   state (request IDs, backend IDs, model names).
+      # G704: SSRF via taint — backend URLs come from operator-supplied
+      #   config.yaml; proxying to them is the whole purpose.
+      excludes:
+        - G104
+        - G301
+        - G304
+        - G306
+        - G704
+        - G706
+      severity: medium
+      confidence: medium
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+
+    misspell:
+      locale: US
+
+    unparam:
+      check-exported: false
+
+  exclusions:
+    rules:
+      # Tests can be more relaxed.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          - bodyclose
+          - noctx
+
+      # Generated files.
+      - path: \.pb\.go$
+        linters:
+          - errcheck
+          - govet
+          - staticcheck
+          - revive
+          - gocritic
+      - path: _generated\.go$
+        linters:
+          - errcheck
+          - govet
+          - staticcheck
+          - revive
+          - gocritic
+
+formatters:
+  enable:
+    - goimports
+    - gofmt
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/wentbackward/llm-proxy
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

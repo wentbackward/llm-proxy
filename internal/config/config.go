@@ -1,3 +1,5 @@
+// Package config loads and validates the proxy YAML configuration and provides
+// lookup helpers for backends and routes.
 package config
 
 import (
@@ -21,19 +23,19 @@ type TLSConfig struct {
 }
 
 type TransportConfig struct {
-	MaxIdleConns        int `yaml:"max_idle_conns"`         // total idle connections across all backends (default: 100)
+	MaxIdleConns        int `yaml:"max_idle_conns"`          // total idle connections across all backends (default: 100)
 	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"` // idle connections per backend (default: 20)
 	IdleConnTimeout     int `yaml:"idle_conn_timeout"`       // seconds before idle connections are closed (default: 120)
 }
 
 type ServerConfig struct {
-	Host                 string          `yaml:"host"`
-	Port                 int             `yaml:"port"`
-	APIKey               string          `yaml:"api_key"`               // required bearer token for inbound requests
-	PassthroughUnrouted  bool            `yaml:"passthrough_unrouted"`  // false = reject unknown models; true = forward to first backend
-	LogLevel             *int            `yaml:"log_level"`             // 0-4 (see internal/logger); LOG_LEVEL env wins when set
-	TLS                  TLSConfig       `yaml:"tls"`
-	Transport            TransportConfig `yaml:"transport"`
+	Host                string          `yaml:"host"`
+	Port                int             `yaml:"port"`
+	APIKey              string          `yaml:"api_key"`              // required bearer token for inbound requests
+	PassthroughUnrouted bool            `yaml:"passthrough_unrouted"` // false = reject unknown models; true = forward to first backend
+	LogLevel            *int            `yaml:"log_level"`            // 0-4 (see internal/logger); LOG_LEVEL env wins when set
+	TLS                 TLSConfig       `yaml:"tls"`
+	Transport           TransportConfig `yaml:"transport"`
 }
 
 type PrometheusConfig struct {
@@ -90,7 +92,7 @@ func (p *PortRange) UnmarshalYAML(value *yaml.Node) error {
 
 type Backend struct {
 	ID             string    `yaml:"id"`
-	Type           string    `yaml:"type"`      // openai | anthropic
+	Type           string    `yaml:"type"` // openai | anthropic
 	BaseURL        string    `yaml:"base_url"`
 	APIKey         string    `yaml:"api_key"`
 	AuthType       string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
@@ -98,7 +100,7 @@ type Backend struct {
 	MaxConcurrency int       `yaml:"max_concurrency"` // 0 = unlimited; limits in-flight requests to this backend
 	SkipProbe      bool      `yaml:"skip_probe"`      // skip /v1/models health check at startup/SIGHUP
 	Default        bool      `yaml:"default"`         // target for passthrough_unrouted and /v1/models; at most one backend may set this
-	Ports          PortRange `yaml:"ports"`            // expand this backend into one per port; use {port} in id and base_url
+	Ports          PortRange `yaml:"ports"`           // expand this backend into one per port; use {port} in id and base_url
 }
 
 type AutoRoute struct {
@@ -199,9 +201,10 @@ func expandEnvVars(s string) string {
 // backend per port, substituting {port} in id and base_url.
 func expandPorts(backends []Backend) ([]Backend, error) {
 	var out []Backend
-	for _, b := range backends {
+	for i := range backends {
+		b := &backends[i]
 		if len(b.Ports) == 0 {
-			out = append(out, b)
+			out = append(out, *b)
 			continue
 		}
 		if !strings.Contains(b.ID, "{port}") {
@@ -212,7 +215,7 @@ func expandPorts(backends []Backend) ([]Backend, error) {
 		}
 		for _, port := range b.Ports {
 			ps := strconv.Itoa(port)
-			expanded := b // copy
+			expanded := *b // copy
 			expanded.ID = strings.ReplaceAll(b.ID, "{port}", ps)
 			expanded.BaseURL = strings.ReplaceAll(b.BaseURL, "{port}", ps)
 			expanded.Ports = nil
@@ -266,7 +269,8 @@ func validate(cfg *Config) error {
 func validateBackends(backends []Backend) (map[string]bool, error) {
 	ids := make(map[string]bool, len(backends))
 	var defaultID string
-	for _, b := range backends {
+	for i := range backends {
+		b := &backends[i]
 		if b.ID == "" {
 			return nil, fmt.Errorf("backend missing id")
 		}
