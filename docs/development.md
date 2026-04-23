@@ -50,6 +50,20 @@ Multi-arch images (linux/amd64, linux/arm64) are built automatically by the rele
 
 ## Release process
 
-1. Commit and push to `main` — CI runs tests
-2. Tag a version: `git tag v0.x.y && git push --tags`
-3. Release workflow runs tests, builds binaries (linux/darwin/windows × amd64/arm64), creates a GitHub release, and pushes Docker images to `ghcr.io/wentbackward/llm-proxy`
+**Pushes to `main` do not ship a release.** CI (`ci.yml`) runs tests on every push but does not build binaries or publish Docker images. The Docker image at `ghcr.io/wentbackward/llm-proxy:latest` only updates when a version tag is pushed.
+
+Anything merged to `main` without a tag is invisible to prod until you tag.
+
+1. Commit and push to `main` — CI runs tests (`ci.yml`).
+2. When you want to ship, tag and push the tag:
+   ```bash
+   git tag v0.x.y
+   git push origin v0.x.y
+   ```
+3. The release workflow (`release.yml`, triggered only by `v*` tag pushes) runs tests, builds binaries (linux/darwin/windows × amd64/arm64), creates a GitHub release with auto-generated notes, and publishes the multi-arch Docker image to `ghcr.io/wentbackward/llm-proxy` with tags `:latest`, `:{major}`, `:{major}.{minor}`, and `:{full}`.
+4. Typical runtime: ~8 minutes end to end.
+5. On prod: `docker compose pull && docker compose up -d --force-recreate`.
+
+### Versioning
+
+Pre-1.0 patch bumps (`v0.2.x → v0.2.x+1`) are used for both features and fixes in this repo. Bump the minor for a deliberate break or a larger theme of changes.
