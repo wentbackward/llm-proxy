@@ -1,8 +1,15 @@
 services:
   llm-proxy:
     build: .
+    # Or pull the prebuilt image instead of building locally:
+    # image: ghcr.io/wentbackward/llm-proxy:latest
     container_name: llm-proxy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "200m"   # rotate container logs at 200 MB per file
+        max-file: "5"      # keep up to 5 rotated files (1 GB total)
     ports:
       - "4000:4000"   # proxy
       - "9091:9091"   # prometheus metrics

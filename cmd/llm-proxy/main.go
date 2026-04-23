@@ -29,6 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	logger.Apply(cfg.Server.LogLevel)
 
 	metrics, metricsHandler, err := telemetry.Init()
 	if err != nil {
@@ -112,12 +113,13 @@ func main() {
 	go func() {
 		for range hup {
 			log.Println("[llm-proxy] SIGHUP received — reloading config")
-			logger.Reload()
 			newCfg, err := config.Load(cfgPath)
 			if err != nil {
 				log.Printf("[llm-proxy] config reload failed: %v (keeping old config)", err)
+				logger.Apply(srv.Config().Server.LogLevel)
 			} else {
 				srv.Reload(newCfg)
+				logger.Apply(newCfg.Server.LogLevel)
 			}
 			probeBackends(srv.Config())
 		}

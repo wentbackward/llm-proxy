@@ -29,7 +29,7 @@ If the new config fails to parse, the old config is kept and an error is logged.
 
 ## Log levels
 
-Set `LOG_LEVEL` in the environment (default `0`). Reloaded on `SIGHUP`.
+Set in `config.yaml` under `server.log_level`, or via the `LOG_LEVEL` environment variable. Default is `0`. Reloaded on `SIGHUP`.
 
 | Level | What is logged |
 |---|---|
@@ -40,10 +40,18 @@ Set `LOG_LEVEL` in the environment (default `0`). Reloaded on `SIGHUP`.
 | `4` | Level 3 + full message text content (request and response) |
 
 ```yaml
-# docker-compose.yml
+# config.yaml
+server:
+  log_level: 2
+```
+
+```yaml
+# docker-compose.yml — env wins over config when both are set, useful for ops overrides
 environment:
   LOG_LEVEL: "1"
 ```
+
+The startup line `[logger] log level N (config|env|default)` shows which source won.
 
 ## Interaction ID
 

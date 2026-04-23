@@ -220,6 +220,61 @@ backends:
 	}
 }
 
+func TestLogLevel_Unset(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: local
+    type: openai
+    base_url: "http://localhost:8000"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.LogLevel != nil {
+		t.Errorf("log_level should be nil when omitted, got %v", *cfg.Server.LogLevel)
+	}
+}
+
+func TestLogLevel_ExplicitZero(t *testing.T) {
+	path := writeTemp(t, `
+server:
+  log_level: 0
+backends:
+  - id: local
+    type: openai
+    base_url: "http://localhost:8000"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.LogLevel == nil {
+		t.Fatal("log_level: 0 should round-trip as non-nil pointer (distinguishes from unset)")
+	}
+	if *cfg.Server.LogLevel != 0 {
+		t.Errorf("log_level: got %d, want 0", *cfg.Server.LogLevel)
+	}
+}
+
+func TestLogLevel_ParsesNonZero(t *testing.T) {
+	path := writeTemp(t, `
+server:
+  log_level: 3
+backends:
+  - id: local
+    type: openai
+    base_url: "http://localhost:8000"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.LogLevel == nil || *cfg.Server.LogLevel != 3 {
+		t.Errorf("log_level: got %v, want 3", cfg.Server.LogLevel)
+	}
+}
+
 func TestPorts_Single(t *testing.T) {
 	path := writeTemp(t, `
 backends:

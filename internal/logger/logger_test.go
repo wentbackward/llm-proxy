@@ -131,6 +131,61 @@ func TestContent_OnlyLogsAtLevel4(t *testing.T) {
 	}
 }
 
+func TestApply_YAMLOnlyWhenEnvUnset(t *testing.T) {
+	os.Unsetenv("LOG_LEVEL")
+	yaml := 2
+	Apply(&yaml)
+	if Get() != 2 {
+		t.Errorf("yaml-only: got %d, want 2", Get())
+	}
+}
+
+func TestApply_EnvWinsOverYAML(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "3")
+	yaml := 1
+	Apply(&yaml)
+	if Get() != 3 {
+		t.Errorf("env should override yaml: got %d, want 3", Get())
+	}
+}
+
+func TestApply_NilYAMLFallsBackToEnv(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "2")
+	Apply(nil)
+	if Get() != 2 {
+		t.Errorf("nil yaml + env: got %d, want 2", Get())
+	}
+}
+
+func TestApply_NilYAMLNoEnvIsDefault(t *testing.T) {
+	os.Unsetenv("LOG_LEVEL")
+	Apply(nil)
+	if Get() != LevelError {
+		t.Errorf("nil yaml + no env: got %d, want 0", Get())
+	}
+}
+
+func TestApply_ExplicitZeroFromYAML(t *testing.T) {
+	os.Unsetenv("LOG_LEVEL")
+	zero := 0
+	// First raise the level so we can see Apply lower it back to 0
+	one := 1
+	Apply(&one)
+	Apply(&zero)
+	if Get() != 0 {
+		t.Errorf("yaml=0 should set level 0, got %d", Get())
+	}
+}
+
+func TestApply_OutOfRangeYAMLIgnored(t *testing.T) {
+	os.Unsetenv("LOG_LEVEL")
+	bad := 99
+	Apply(&bad)
+	if Get() != LevelError {
+		t.Errorf("out-of-range yaml should be ignored, got %d", Get())
+	}
+}
+
 func TestHigherLevelIncludesLower(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "4")
 	Reload()

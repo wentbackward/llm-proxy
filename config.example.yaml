@@ -3,6 +3,8 @@ server:
   port: 4000
   api_key: "${PROXY_API_KEY}"     # clients must send: Authorization: Bearer <key>
   passthrough_unrouted: false    # false = reject unknown models with 404; true = forward to first backend
+  # log_level: 1                 # 0=errors, 1=requests, 2=+headers, 3=+body preview, 4=+full message text
+                                  # LOG_LEVEL env var overrides this when set
   tls:
     cert: ""   # path to TLS certificate (e.g. /certs/spark-01.ts.net.crt)
     key:  ""   # path to TLS private key  (e.g. /certs/spark-01.ts.net.key)

@@ -8,8 +8,9 @@
 //	3 = body     — level 2 + first 80 chars of request body
 //	4 = content  — level 3 + full message text (request and response)
 //
-// Set LOG_LEVEL=<n> in the environment. Send SIGHUP to reload from the
-// environment without restarting: docker kill --signal=HUP llm-proxy
+// Set via server.log_level in config.yaml, or LOG_LEVEL=<n> in the
+// environment (env wins when both are set). Send SIGHUP to reload:
+// docker kill --signal=HUP llm-proxy
 package logger
 
 import (
@@ -34,16 +35,28 @@ func init() {
 }
 
 // Reload reads LOG_LEVEL from the environment and applies it.
-// Called automatically at startup and on SIGHUP.
-func Reload() {
+// Called automatically at package init.
+func Reload() { Apply(nil) }
+
+// Apply sets the log level using yamlLevel as the configured baseline,
+// with the LOG_LEVEL environment variable taking precedence when set.
+// yamlLevel may be nil (no YAML setting) or out-of-range (ignored).
+// Use this from main after config load and on SIGHUP.
+func Apply(yamlLevel *int) {
 	l := LevelError
+	src := "default"
+	if yamlLevel != nil && *yamlLevel >= LevelError && *yamlLevel <= LevelContent {
+		l = *yamlLevel
+		src = "config"
+	}
 	if s := os.Getenv("LOG_LEVEL"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 0 && n <= 4 {
+		if n, err := strconv.Atoi(s); err == nil && n >= LevelError && n <= LevelContent {
 			l = n
+			src = "env"
 		}
 	}
 	current.Store(int32(l))
-	log.Printf("[logger] log level %d", l)
+	log.Printf("[logger] log level %d (%s)", l, src)
 }
 
 // Get returns the current log level.

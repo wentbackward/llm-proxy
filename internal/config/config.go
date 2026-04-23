@@ -31,6 +31,7 @@ type ServerConfig struct {
 	Port                 int             `yaml:"port"`
 	APIKey               string          `yaml:"api_key"`               // required bearer token for inbound requests
 	PassthroughUnrouted  bool            `yaml:"passthrough_unrouted"`  // false = reject unknown models; true = forward to first backend
+	LogLevel             *int            `yaml:"log_level"`             // 0-4 (see internal/logger); LOG_LEVEL env wins when set
 	TLS                  TLSConfig       `yaml:"tls"`
 	Transport            TransportConfig `yaml:"transport"`
 }
