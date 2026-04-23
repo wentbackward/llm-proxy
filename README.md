@@ -74,6 +74,165 @@ Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config.
 
 See the [full configuration reference](docs/configuration.md) for details on auth types, TLS, auto-routing, and parameter profiles.
 
+## Routing in depth
+
+Quick start shows the minimum. This section explains the full model of how requests find their way to a backend — because once you've got more than one virtual model and more than one client, the details matter.
+
+### The request pipeline
+
+Every request follows the same path:
+
+```
+client → POST /v1/chat/completions   body.model = "my-virtual-name"
+                │
+                ▼
+       ┌──────────────────┐
+       │ 1. Resolve route │──── unknown model? → 404 (or passthrough)
+       └──────────────────┘
+                │
+                ▼
+       ┌──────────────────┐
+       │ 2. Merge params  │     defaults < caller < clamp
+       └──────────────────┘
+                │
+                ▼
+       ┌────────────────────┐
+       │ 3. Translate       │   enable_thinking → provider-specific shape
+       └────────────────────┘
+                │
+                ▼
+       ┌──────────────────────┐
+       │ 4. Forward to backend│   SSE streams straight to the client
+       └──────────────────────┘
+```
+
+The proxy **does not translate between OpenAI and Anthropic protocols**. A client speaking OpenAI chat completions can only reach `openai`-type backends; a client speaking Anthropic messages can only reach `anthropic`-type backends. Pick one per client.
+
+### Naming virtual models — the "look like any provider" trick
+
+The `virtual_model` name is an arbitrary string — whatever the client sends in the `"model"` field is what the proxy matches against. Many client tools prefix the model name to identify the provider (`openai/gpt-4`, `anthropic/claude-3`), and some strip that prefix before sending the request onward. You can make the proxy **look like any provider** by naming your virtual models to match the client's convention:
+
+| Client convention | Virtual model name you'd configure |
+|---|---|
+| Bare name (OpenWebUI, most clients) | `qwen-coder` |
+| Provider prefix, prefix stripped before send (LiteLLM) | `qwen-coder` |
+| Slash namespace in the name (dropdowns) | `local/qwen-coder` |
+| Fully-qualified HF-style | `Qwen/Qwen3-Coder-30B` |
+
+If a client breaks, set `LOG_LEVEL=1` and read the `[req]` line — it shows the exact model name that arrived. Then name your virtual model to match.
+
+### Routing decisions
+
+Three layers decide where a request goes, in order:
+
+1. **Explicit route** — a route with `virtual_model: X` and either `backend: Y` or `auto_route:`. Checked first.
+2. **`auto_route`** — a virtual model whose body is inspected to pick between two sub-routes:
+   ```yaml
+   - virtual_model: smart
+     auto_route:
+       text:   my-text-route     # used when request is text-only
+       vision: my-vision-route   # used when request contains images
+   ```
+3. **`passthrough_unrouted`** — when `true`, unknown model names are forwarded as-is to the default backend (see below). When `false` (default), they return 404 with the list of available virtual models.
+
+The **default backend** is the one marked `default: true` in its config, or the first backend in the list if none is marked. It's also the source for `/v1/models` — the proxy pulls real context lengths from it and rewrites the response to show your virtual model names.
+
+### Parameter profiles — defaults, caller, clamp
+
+Three layers merge per route, in priority order:
+
+```yaml
+- virtual_model: coder
+  backend: local
+  real_model: Qwen/Qwen3-Coder-30B
+  defaults:
+    temperature: 0.2
+    max_tokens: 16384
+    enable_thinking: true
+  clamp:
+    enable_thinking: true       # caller cannot disable thinking, ever
+```
+
+- **`defaults`** — applied if the caller didn't set the key. *"My preferred defaults."*
+- **caller** — the request body's own values override `defaults`. *"Let clients tune it."*
+- **`clamp`** — applied unconditionally, overriding both. *"This is non-negotiable."*
+
+Use `clamp` sparingly — it's useful for "always on / always off" guarantees like thinking mode, a ceiling on `max_tokens`, or pinning `temperature` for reproducibility.
+
+### Recipes
+
+#### OpenWebUI
+
+Admin Panel → Settings → Connections → add an OpenAI API:
+
+- Base URL: `http://llm-proxy:4000/v1`
+- API Key: whatever you set as `server.api_key`
+
+Click the refresh icon on the connection. OpenWebUI calls `/v1/models` and populates its dropdown with your virtual model names. That's it.
+
+#### LiteLLM
+
+LiteLLM wants a provider prefix. For custom OpenAI-compatible endpoints, prefix with `openai/` — at time of writing LiteLLM strips that prefix before calling the base URL:
+
+```yaml
+model_list:
+  - model_name: qwen-coder
+    litellm_params:
+      model: openai/qwen-coder
+      api_base: http://llm-proxy:4000/v1
+      api_key: os.environ/PROXY_API_KEY
+```
+
+If the version of LiteLLM you're running *doesn't* strip the prefix, you'll see `openai/qwen-coder` arrive at the proxy (check `LOG_LEVEL=1`). Either register a matching virtual model or update LiteLLM.
+
+#### opencode
+
+Add a provider block to `~/.opencode/config.json`:
+
+```json
+{
+  "providers": {
+    "local": {
+      "baseUrl": "http://llm-proxy:4000/v1",
+      "apiKey": "nokey",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen-coder",
+          "name": "qwen-coder",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 131072,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}
+```
+
+Inside opencode, `/model` will list the models. `cost` is zero because it's your own hardware — set real values if you're proxying a cloud API and want opencode's cost accounting to be accurate.
+
+#### Claude Code
+
+Point it at an `anthropic`-type backend through the proxy:
+
+```bash
+export ANTHROPIC_BASE_URL=http://llm-proxy:4000
+export ANTHROPIC_AUTH_TOKEN=$PROXY_API_KEY
+claude
+```
+
+Use `/model` inside Claude Code to pick a virtual model whose route points to your anthropic backend. The proxy forwards `/v1/messages` unchanged, so thinking, tool use, and streaming all work.
+
+#### Any OpenAI-compatible client
+
+- Base URL: `http://llm-proxy:4000/v1`
+- API key: your `server.api_key`
+
+The client sees virtual models via `/v1/models`. If anything odd happens, `LOG_LEVEL=1` + `[req]` line will show you the model name as received — 90% of client-integration issues diagnose from that one line.
+
 ## Capturing full request bodies for debugging
 
 The metrics pipeline records sizes and previews — fine for observability, not enough when you need to diff two requests byte-for-byte or inspect a tool array. For that, add to `config.yaml`:
