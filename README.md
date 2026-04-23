@@ -255,11 +255,40 @@ jq . ./local-captures/*.json
 
 The container-local path is ephemeral — files live in the container's writable layer and are discarded on rebuild/recreate, which suits ad-hoc debugging. If you want persistence across rebuilds, bind-mount or use a named volume; see [logging.md](docs/logging.md#full-body-message-capture-sigusr1) for the full reference (file format, security notes, streaming behaviour).
 
+## Security
+
+llm-proxy is built for personal/small-team use behind a trusted boundary — Tailscale, VPN, or a private subnet. A few things are worth knowing:
+
+**Transport.** Two reasonable options: (a) run on Tailscale and let WireGuard encrypt the wire — plaintext HTTP between tailnet peers is as safe in practice as HTTPS over the open internet; or (b) configure `server.tls` with a cert and key for direct HTTPS. Outbound to providers is always HTTPS if the `base_url` says so, verified against the system CA bundle.
+
+**Auth.** Clients send `Authorization: Bearer <server.api_key>`. The compare is constant-time. The token is static — rotate by editing config and sending SIGHUP. Empty `api_key` disables auth (only safe on a loopback-only bind).
+
+**Metrics.** `/metrics` has no auth. It binds to `127.0.0.1:9091` by default — localhost-only. Set `telemetry.prometheus.host: "0.0.0.0"` to expose on a trusted network.
+
+**Features that can expose prompt contents.** This is the part to read carefully in the [full security doc](docs/security.md). In summary:
+
+- `LOG_LEVEL=3` logs 80 bytes of request bodies. `LOG_LEVEL=4` logs full request and response message text.
+- The request journal, when enabled, records up to 2 KB of system prompt and 8 KB of the last user message per request — regardless of log level.
+- SIGUSR1 message capture writes full request/response bodies to disk for a bounded window, for debugging. Off by default; requires both `sig_message_capture.enabled: true` and an `output_folder` to activate.
+
+**Hardened build.** For deployments where any of the above is unacceptable, build with `-tags hardened`:
+
+```bash
+make build-hardened
+# or:
+go build -tags hardened -o llm-proxy ./cmd/llm-proxy
+```
+
+The hardened tag **compiles out** (not just disables) SIGUSR1 capture, log levels 3-4, and the prompt text in journal entries. Structural telemetry — counts, structural signals, routing params — is kept. Every build prints a banner at startup identifying which mode it's running in, so operators can verify via `docker logs` without re-reading config. Details in [docs/security.md](docs/security.md).
+
+**Container.** `FROM scratch` + `USER 65532:65532` — non-root, no shell, no libc. Weekly Dependabot PRs for `go.mod`, GitHub Actions, and the Docker base image.
+
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — backends, routes, virtual models, parameter profiles, TLS
 - **[Logging and diagnostics](docs/logging.md)** — log levels, interaction IDs, request journal, hot reload
 - **[Metrics](docs/metrics.md)** — OTel/Prometheus metrics reference
+- **[Security](docs/security.md)** — threat model, transport, prompt-exposing features, hardened build
 - **[Development](docs/development.md)** — building, testing, project structure
 
 ## License
