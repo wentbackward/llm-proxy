@@ -108,7 +108,7 @@ client → POST /v1/chat/completions   body.model = "my-virtual-name"
 
 The proxy **does not translate between OpenAI and Anthropic protocols**. A client speaking OpenAI chat completions can only reach `openai`-type backends; a client speaking Anthropic messages can only reach `anthropic`-type backends. Pick one per client.
 
-### Naming virtual models — the "look like any provider" trick
+### Naming virtual models — the "look like any provider" recipe
 
 The `virtual_model` name is an arbitrary string — whatever the client sends in the `"model"` field is what the proxy matches against. Many client tools prefix the model name to identify the provider (`openai/gpt-4`, `anthropic/claude-3`), and some strip that prefix before sending the request onward. You can make the proxy **look like any provider** by naming your virtual models to match the client's convention:
 
@@ -172,18 +172,18 @@ Click the refresh icon on the connection. OpenWebUI calls `/v1/models` and popul
 
 #### LiteLLM
 
-LiteLLM wants a provider prefix. For custom OpenAI-compatible endpoints, prefix with `openai/` — at time of writing LiteLLM strips that prefix before calling the base URL:
-
-```yaml
-model_list:
-  - model_name: qwen-coder
-    litellm_params:
-      model: openai/qwen-coder
-      api_base: http://llm-proxy:4000/v1
-      api_key: os.environ/PROXY_API_KEY
-```
+LiteLLM wants a provider prefix. For custom OpenAI-compatible endpoints, prefix with `openai/` — at time of writing LiteLLM strips that prefix before calling the base URL, so a virtual model named `qwen-coder` is reached as `openai/qwen-coder` in LiteLLM config.
 
 If the version of LiteLLM you're running *doesn't* strip the prefix, you'll see `openai/qwen-coder` arrive at the proxy (check `LOG_LEVEL=1`). Either register a matching virtual model or update LiteLLM.
+
+#### Ollama
+
+If your client offers "Ollama" as a provider option, it's usually expecting Ollama's OpenAI-compatible endpoint at `http://host:11434/v1`. Point it at llm-proxy instead — the protocol is identical:
+
+- Base URL: `http://llm-proxy:4000/v1`
+- API key: your `server.api_key` (Ollama itself needs no key; llm-proxy does)
+
+The client sees your virtual models via `/v1/models` the same way it would see Ollama's. If the client uses Ollama's native `/api/chat` endpoint rather than `/v1`, llm-proxy can't serve it — switch the client to its generic OpenAI option.
 
 #### opencode
 
