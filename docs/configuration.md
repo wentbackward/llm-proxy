@@ -237,11 +237,36 @@ The proxy translates `enable_thinking` and `thinking_budget` to the correct back
 telemetry:
   prometheus:
     enabled: true
+    host: "127.0.0.1"          # bind address; loopback-only by default
     port: 9091
     path: /metrics
+    allow_plaintext: false     # required to bind non-loopback without TLS
+    tls:
+      cert: ""                 # independent of server.tls
+      key:  ""
 ```
 
+- **`enabled`** — serve Prometheus metrics. Disable to skip the metrics server entirely.
+- **`host`** — bind address. Defaults to `127.0.0.1` (localhost only) because `/metrics` has no authentication. To scrape from another host, set to `0.0.0.0` (or a specific interface) *and* either configure TLS or set `allow_plaintext: true`.
+- **`port`** — TCP port. Default: 9091.
+- **`path`** — URL path. Default: `/metrics`.
+- **`allow_plaintext`** — explicit acknowledgement that binding a non-loopback host without TLS is intended. Required on trusted networks (Tailscale, corporate LAN) where link-layer encryption is your boundary. Startup refuses to bind plaintext on a non-loopback host without this.
+- **`tls.cert`** / **`tls.key`** — paths to a PEM cert and key for HTTPS metrics. Independent of `server.tls` — the metrics endpoint can use a different cert/CA if you want. When set, the metrics server runs `ListenAndServeTLS`.
+
 See [Metrics](metrics.md) for the full metrics reference.
+
+### Migrating from older configs
+
+Before v0.2.17 the metrics server bound to `0.0.0.0:9091` implicitly. Current versions default to `127.0.0.1`. If your scraper suddenly can't reach `/metrics`, restore network exposure with:
+
+```yaml
+telemetry:
+  prometheus:
+    host: "0.0.0.0"
+    allow_plaintext: true      # if you're on a trusted network (Tailscale etc.)
+```
+
+…or configure `tls.cert` + `tls.key` for HTTPS. Unlike most config, changes to `telemetry.prometheus.*` do **not** pick up on SIGHUP — the metrics server is built once at startup. Restart the container with `docker compose up -d --force-recreate` to apply.
 
 ## Journal
 

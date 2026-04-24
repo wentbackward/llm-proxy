@@ -14,7 +14,10 @@ services:
       - "4000:4000"   # proxy
       - "9091:9091"   # prometheus metrics
     volumes:
-      - .:/config:ro
+      # Directory-level mount (NOT file-level) so editors that save atomically
+      # — vim's writebackup, VS Code, etc. — don't orphan the container's
+      # inode. Create ./config/config.yaml locally before first `up`.
+      - ./config:/config:ro
       # Mount Tailscale certs for TLS (run: tailscale cert <hostname>)
       # - /var/lib/tailscale/certs:/certs:ro
     environment:

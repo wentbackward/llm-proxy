@@ -47,12 +47,15 @@ routes:
 ## Quick start
 
 ```bash
-cp config.example.yaml config.yaml
-# Edit config.yaml — set your backends and API keys
+mkdir -p config
+cp config.example.yaml config/config.yaml
+# Edit config/config.yaml — set your backends and API keys
 docker compose up -d
 ```
 
 Point your client at `http://localhost:4000/v1`. Metrics at `http://localhost:9091/metrics`.
+
+(The `config/` subdirectory exists so docker bind-mounts the folder, not the file — editors that save atomically (vim's `writebackup`, VS Code, etc.) won't orphan the container's view of the file on SIGHUP reload.)
 
 ## Configuration
 

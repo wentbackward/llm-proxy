@@ -65,6 +65,24 @@ The Dockerfile uses a two-stage build: Go builder on `golang:1.25-alpine`, then 
 
 Multi-arch images (linux/amd64, linux/arm64) are built automatically by the release workflow on tag push.
 
+## SIGHUP reload — what applies, what doesn't
+
+`docker kill --signal=HUP llm-proxy` re-reads `config.yaml` and atomically swaps in the new state. Good for iterating on routes and backends without disturbing in-flight requests. But several pieces are initialised once at startup and do **not** reload:
+
+| Config change | Reloads via SIGHUP? |
+|---|---|
+| `routes.*` — virtual models, real models, backends, defaults, clamp, auto-route | ✅ |
+| `backends.*` — URL, api_key, auth_type, timeout, max_concurrency, default flag | ✅ |
+| `server.log_level` / `LOG_LEVEL` | ✅ |
+| `server.passthrough_unrouted` | ✅ |
+| `server.allow_plaintext`, `server.tls.*` | ✅ *policy check only* — accepted or rejected; the listener itself is not rebuilt |
+| `sig_message_capture.*` | ✅ (feature is rebuilt, arm state reset) |
+| `server.host` / `server.port` / `server.transport.*` | ❌ Restart |
+| `telemetry.prometheus.*` (host, port, path, TLS, allow_plaintext) | ❌ Restart |
+| `journal.enabled` / `journal.otlp_endpoint` | ❌ Restart |
+
+When in doubt, check `docker logs llm-proxy 2>&1 | grep -A20 "SIGHUP received"` — the `[reload]` block prints the full route table the proxy now knows about. If your change doesn't appear there, the container didn't see it (most common cause: file-level bind mount + atomic-save editor; see the Quick start in the README).
+
 ## Release process
 
 **Pushes to `main` do not ship a release.** CI (`ci.yml`) runs tests on every push but does not build binaries or publish Docker images. The Docker image at `ghcr.io/wentbackward/llm-proxy:latest` only updates when a version tag is pushed.
