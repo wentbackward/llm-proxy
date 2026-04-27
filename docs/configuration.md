@@ -281,6 +281,59 @@ routes:
 
 `defaults` and `clamp` operate on the sampling-keys whitelist at the top level (and run first). `inject` is for everything else (and runs after). For sampling keys, prefer `clamp`. For non-sampling keys, use `inject`. There's no enforcement preventing overlap; injecting the same sampling key the route also clamps will resolve to the inject value (route still wins, just via a different mechanism).
 
+### Outbound header manipulation
+
+Routes and backends can each declare a `headers:` block that mutates the HTTP headers sent to the upstream. Three operations: `add`, `remove`, `rename`. Applied per request in the order **rename → remove → add** so a single block can rename `Authorization` to preserve audit, drop it, and add a fresh one — all in one config block.
+
+```yaml
+backends:
+  - id: corporate-llm
+    type: openai
+    base_url: "https://internal.corp/llm"
+    headers:
+      add:
+        X-Corp-Auth: "${CORP_TOKEN}"        # static, applied to every request to this backend
+        X-Service-Account: "llm-proxy"
+
+routes:
+  - virtual_model: gresh-internal
+    backend: corporate-llm
+    real_model: corp-llama
+    headers:
+      remove:
+        - X-Forwarded-For                   # don't leak caller IP
+        - User-Agent
+      add:
+        X-Tenant-Id: "${TENANT_ID}"
+      rename:
+        Authorization: X-Original-Auth      # audit-preserve client auth before backend.headers adds a fresh one
+```
+
+**Scopes and precedence**
+
+- **Backend** `headers` apply to every request to that backend (typical use: static infrastructure headers like a corporate auth token).
+- **Route** `headers` apply on top of backend's, after them, so route wins on per-name conflict (typical use: per-virtual-model tenant tags, audit preservation).
+
+**Operation semantics**
+
+- **`add`** — `name: value` pairs. Overwrites any existing value at that name. Values support `${ENV_VAR}` expansion at config load.
+- **`remove`** — list of header names to drop. Header names are case-insensitive (`x-forwarded-for` and `X-Forwarded-For` are equivalent).
+- **`rename`** — `old: new` pairs. Copies all values from `old` to `new`, then deletes `old`. If `new` already exists, it's replaced. Multi-valued headers preserve all values.
+
+**Order of operations within one block**
+
+`rename → remove → add`. Designed so an operator can:
+
+1. Rename `Authorization` to `X-Original-Auth` (preserve client auth)
+2. (skip — nothing to remove in this case)
+3. Add a new `Authorization` from a backend secret
+
+…in a single, readable config block.
+
+**Quirk: `X-Forwarded-For` removal**
+
+`httputil.ReverseProxy` auto-appends the client IP to `X-Forwarded-For` after the request leaves the proxy's hands. The standard library's documented opt-out is to set the slot to nil, which the proxy does internally when you list `X-Forwarded-For` under `remove`. Operators just need to add it to `remove` like any other header — the special handling is invisible.
+
 ## Telemetry
 
 ```yaml

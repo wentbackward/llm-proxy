@@ -513,7 +513,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	rp := &httputil.ReverseProxy{
 		Transport:      s.transport,
-		Director:       director(targetURL, backend, newBody, opts.pathOverride),
+		Director:       director(targetURL, backend, newBody, opts.pathOverride, routeHeaders(res)),
 		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
@@ -637,7 +637,7 @@ func safeHeaders(h http.Header) map[string]string {
 // director returns an httputil.ReverseProxy Director that rewrites the request
 // for the given backend. If pathOverride is non-empty, it replaces the request
 // path (used by /v1/completions to force the backend path).
-func director(target *url.URL, backend *config.Backend, body []byte, pathOverride string) func(*http.Request) {
+func director(target *url.URL, backend *config.Backend, body []byte, pathOverride string, routeHeaders config.HeadersOp) func(*http.Request) {
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
@@ -676,6 +676,57 @@ func director(target *url.URL, backend *config.Backend, body []byte, pathOverrid
 		req.ContentLength = int64(len(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Del("Transfer-Encoding")
+
+		// Header manipulation: backend-level first (infrastructure), then
+		// route-level (request-specific) so route wins on conflict.
+		if !backend.Headers.IsZero() {
+			applyHeaderOps(req.Header, backend.Headers)
+		}
+		if !routeHeaders.IsZero() {
+			applyHeaderOps(req.Header, routeHeaders)
+		}
+	}
+}
+
+// routeHeaders returns the route's HeadersOp from a Resolution, or a zero
+// value when the request was passthrough (no route matched).
+func routeHeaders(res *router.Resolution) config.HeadersOp {
+	if res == nil {
+		return config.HeadersOp{}
+	}
+	return res.Headers
+}
+
+// applyHeaderOps applies the configured header operations to h in the order
+// rename → remove → add. Header names are case-insensitive (http.Header
+// canonicalises). Add overwrites; Remove drops; Rename copies values to the
+// new name and deletes the original (replacing the destination if it exists).
+func applyHeaderOps(h http.Header, op config.HeadersOp) {
+	for src, dst := range op.Rename {
+		// Get returns the first value; use values for the full set.
+		vs := h.Values(src)
+		if len(vs) == 0 {
+			continue
+		}
+		h.Del(dst)
+		for _, v := range vs {
+			h.Add(dst, v)
+		}
+		h.Del(src)
+	}
+	for _, name := range op.Remove {
+		// X-Forwarded-For is special: httputil.ReverseProxy auto-appends
+		// the client IP after Director returns *unless* the slot is set
+		// to nil. h.Del wouldn't be enough — we'd see XFF reappear at the
+		// backend. Setting nil is the documented opt-out.
+		if http.CanonicalHeaderKey(name) == "X-Forwarded-For" {
+			h["X-Forwarded-For"] = nil
+			continue
+		}
+		h.Del(name)
+	}
+	for name, value := range op.Add {
+		h.Set(name, value)
 	}
 }
 

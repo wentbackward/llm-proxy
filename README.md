@@ -183,6 +183,28 @@ Two escape hatches for vendor-specific quirks that don't belong in the proxy cor
 
 `system_prompt` mutates the system message (or `body.system` for Anthropic) before the request leaves the proxy. `inject` deep-merges arbitrary JSON into the request body. Together they cover most "this vendor needs an unusual knob set" cases without the proxy growing per-vendor knowledge. Full semantics in [docs/configuration.md](docs/configuration.md#per-route-system-prompt-and-body-injection).
 
+### Outbound header manipulation
+
+Per-route and per-backend `headers:` blocks let operators rewrite outbound HTTP headers. Three ops — `add`, `remove`, `rename` — applied in that order so an operator can rename `Authorization` to preserve audit, drop it, and add a fresh one in a single block:
+
+```yaml
+backends:
+  - id: corporate-llm
+    headers:
+      add: { X-Corp-Auth: "${CORP_TOKEN}" }
+
+routes:
+  - virtual_model: gresh-internal
+    backend: corporate-llm
+    real_model: corp-llama
+    headers:
+      remove: [X-Forwarded-For, User-Agent]
+      add:    { X-Tenant-Id: "${TENANT_ID}" }
+      rename: { Authorization: X-Original-Auth }
+```
+
+Backend headers apply first; route headers apply on top, route wins on conflict. Full reference in [docs/configuration.md](docs/configuration.md#outbound-header-manipulation).
+
 ### Recipes
 
 #### OpenWebUI

@@ -30,6 +30,9 @@ type Resolution struct {
 	SystemPrompt config.SystemPromptOp
 	// Inject is the route's optional body deep-merge map. Nil if unset.
 	Inject map[string]interface{}
+	// Headers is the route's optional outbound header manipulation. Applied
+	// after backend.Headers so route wins on conflict.
+	Headers config.HeadersOp
 }
 
 // Router resolves virtual model names.
@@ -86,6 +89,7 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 		Params:       params,
 		SystemPrompt: route.SystemPrompt,
 		Inject:       route.Inject,
+		Headers:      route.Headers,
 	}, nil
 }
 

@@ -106,6 +106,7 @@ type Backend struct {
 	SkipProbe      bool      `yaml:"skip_probe"`      // skip /v1/models health check at startup/SIGHUP
 	Default        bool      `yaml:"default"`         // target for passthrough_unrouted and /v1/models; at most one backend may set this
 	Ports          PortRange `yaml:"ports"`           // expand this backend into one per port; use {port} in id and base_url
+	Headers        HeadersOp `yaml:"headers"`         // outbound header manipulation applied to every request to this backend
 }
 
 type AutoRoute struct {
@@ -126,6 +127,26 @@ func (s SystemPromptOp) IsZero() bool {
 	return s.Prepend == "" && s.Append == "" && s.Replace == ""
 }
 
+// HeadersOp manipulates outbound HTTP headers before forwarding to the
+// backend. Operations apply in the order: rename → remove → add. This lets
+// an operator rename Authorization → X-Original-Auth, then add a new
+// Authorization, in one block.
+//
+// Header names are case-insensitive (Go's http.Header normalises them).
+// Add overwrites any existing value at that name. Remove drops the header
+// entirely. Rename copies the existing values to the new name and deletes
+// the original; if the destination already exists, it is replaced.
+type HeadersOp struct {
+	Add    map[string]string `yaml:"add"`    // name → value
+	Remove []string          `yaml:"remove"` // names to drop
+	Rename map[string]string `yaml:"rename"` // old → new
+}
+
+// IsZero reports whether no header manipulation is requested.
+func (h HeadersOp) IsZero() bool {
+	return len(h.Add) == 0 && len(h.Remove) == 0 && len(h.Rename) == 0
+}
+
 type Route struct {
 	VirtualModel  string                 `yaml:"virtual_model"`
 	Backend       string                 `yaml:"backend"`
@@ -136,6 +157,7 @@ type Route struct {
 	AutoRoute     *AutoRoute             `yaml:"auto_route"`
 	SystemPrompt  SystemPromptOp         `yaml:"system_prompt"` // optional pre-send mutation of the system prompt
 	Inject        map[string]interface{} `yaml:"inject"`        // deep-merged into the body before send; route wins per leaf key
+	Headers       HeadersOp              `yaml:"headers"`       // outbound header manipulation applied after backend.Headers (route wins on conflict)
 }
 
 type JournalConfig struct {
