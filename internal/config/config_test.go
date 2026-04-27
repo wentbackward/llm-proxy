@@ -476,6 +476,81 @@ backends:
 	}
 }
 
+func TestSystemPrompt_MutuallyExclusive(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+routes:
+  - virtual_model: m
+    backend: a
+    real_model: rm
+    system_prompt:
+      prepend: "x"
+      append: "y"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error: prepend + append simultaneously")
+	}
+	if !strings.Contains(err.Error(), "system_prompt") {
+		t.Errorf("error should mention system_prompt, got: %v", err)
+	}
+}
+
+func TestSystemPrompt_OneOpAccepted(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+routes:
+  - virtual_model: m
+    backend: a
+    real_model: rm
+    system_prompt:
+      prepend: "<|think|>"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("single op should load, got: %v", err)
+	}
+	r, _ := cfg.Route("m")
+	if r.SystemPrompt.Prepend != "<|think|>" {
+		t.Errorf("prepend round-trip: got %q", r.SystemPrompt.Prepend)
+	}
+}
+
+func TestInject_LoadsAsMap(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+routes:
+  - virtual_model: m
+    backend: a
+    real_model: rm
+    inject:
+      reasoning_effort: high
+      chat_template_kwargs:
+        preserve_thinking: true
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := cfg.Route("m")
+	if v, _ := r.Inject["reasoning_effort"].(string); v != "high" {
+		t.Errorf("inject.reasoning_effort: got %v", r.Inject["reasoning_effort"])
+	}
+	kw, _ := r.Inject["chat_template_kwargs"].(map[string]interface{})
+	if v, _ := kw["preserve_thinking"].(bool); !v {
+		t.Errorf("nested inject preserve_thinking: got %v", kw["preserve_thinking"])
+	}
+}
+
 func TestLogLevel_Unset(t *testing.T) {
 	path := writeTemp(t, `
 backends:

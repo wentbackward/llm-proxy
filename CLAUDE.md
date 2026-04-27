@@ -51,6 +51,20 @@ The proxy does NOT translate between protocols. Three lanes, each isolated:
 
 Do not add bidirectional translation without explicit scope from the user. Ollama's sampling params are nested under `body["options"]`; the proxyRequest pipeline flattens them before router merge and re-nests before send — see `internal/proxy/server.go` for the pattern.
 
+## proxyRequest pipeline order
+
+The body transformation order in `proxyRequest` matters for composition:
+
+1. Read + parse body, flatten Ollama `body["options"]` into top level
+2. Resolve route (router.Resolve — defaults/caller/clamp merge for sampling keys)
+3. Apply route's `system_prompt` op (prepend/append/replace on system message or `body.system` for Anthropic)
+4. Deep-merge route's `inject` map into body
+5. `translateParams` (enable_thinking translation, OpenAI stream_options.include_usage)
+6. Re-nest Ollama options under `body["options"]`
+7. Encode and forward
+
+`inject` runs **before** translateParams so a route can `inject: chat_template_kwargs.preserve_thinking` and have it coexist with the `enable_thinking` kwarg that translation adds. Reordering breaks that composition — keep this order if you ever refactor.
+
 ## Logging and debug capture
 
 - `LOG_LEVEL` env var or `server.log_level` in config.yaml (env wins). Levels 0–4.

@@ -25,6 +25,11 @@ type Resolution struct {
 	// Params contains only sampling parameters — callers must merge these
 	// back into the request body themselves.
 	Params map[string]interface{}
+	// SystemPrompt is the route's optional system-prompt mutation.
+	// IsZero() reports whether any mutation was requested.
+	SystemPrompt config.SystemPromptOp
+	// Inject is the route's optional body deep-merge map. Nil if unset.
+	Inject map[string]interface{}
 }
 
 // Router resolves virtual model names.
@@ -76,9 +81,11 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 	}
 
 	return &Resolution{
-		Backend:   backend,
-		RealModel: realModel,
-		Params:    params,
+		Backend:      backend,
+		RealModel:    realModel,
+		Params:       params,
+		SystemPrompt: route.SystemPrompt,
+		Inject:       route.Inject,
 	}, nil
 }
 

@@ -231,6 +231,56 @@ The proxy translates `enable_thinking` and `thinking_budget` to the correct back
 | `openai` (vLLM/Qwen) | `chat_template_kwargs.enable_thinking` |
 | `anthropic` | `thinking.type: "enabled"` + `thinking.budget_tokens` |
 
+### Per-route system prompt and body injection
+
+Two route-level operations let operators absorb vendor-specific quirks without baking them into the proxy core:
+
+- **`system_prompt`** mutates the system message before the request leaves the proxy. Useful for backends that signal mode through prompt content (Gemma4's `<|think|>` token, house-style instructions).
+- **`inject`** deep-merges a config-supplied object into the request body. Useful for vendor-specific kwargs that aren't standard sampling params (Kimi's `chat_template_kwargs.thinking_mode`, OpenAI's `reasoning_effort`).
+
+Both run *before* the `enable_thinking` translation, so an `inject` of `chat_template_kwargs` composes cleanly with whatever the translation adds.
+
+```yaml
+routes:
+  - virtual_model: gresh-gemma-think
+    backend: vllm-gemma
+    real_model: gemma-4-27b
+    system_prompt:
+      prepend: "<|think|>\n"        # exactly one of prepend/append/replace
+      # append: "\n\nReply tersely."
+      # replace: "Strict mode: code only."
+
+  - virtual_model: gresh-kimi-deep
+    backend: vllm-kimi
+    real_model: kimi-k2.6
+    inject:
+      chat_template_kwargs:
+        thinking_mode: "deep"
+        preserve_thinking: true
+      reasoning_effort: "high"
+```
+
+**`system_prompt` semantics**
+
+- Exactly zero or one of `prepend`, `append`, `replace` may be set. Multiple = config fails to load.
+- Applies to chat-style endpoints only:
+  - OpenAI / Ollama: targets `messages[]` with `role=system`. If no system message exists, one is created at index 0.
+  - Anthropic: targets the top-level `body.system`. If `system` is an array of content blocks, `prepend` / `append` add a `{"type":"text","text":...}` block at the appropriate end; `replace` swaps to a string.
+- Skipped silently on completion / embedding / tags endpoints (no system concept).
+- Strings are literal — no templating, no env-var expansion, no interpolation. Keep it boring on purpose.
+- Multimodal (array-typed) message content for OpenAI/Ollama is left untouched in this release.
+
+**`inject` semantics**
+
+- Deep merge: maps merge per-leaf-key with the route's value winning; arrays and scalars replace wholesale.
+- No type checking — this is the deliberate escape hatch for arbitrary JSON shapes the proxy doesn't model.
+- Runs *after* `defaults` / `clamp` and *before* `translateParams`, so injecting `chat_template_kwargs.preserve_thinking` and using `enable_thinking: true` together yields a single merged kwargs map at the backend.
+- For Ollama backends, injected keys are folded into `body.options` along with the rest of the sampling params.
+
+**`defaults` / `clamp` vs `inject`**
+
+`defaults` and `clamp` operate on the sampling-keys whitelist at the top level (and run first). `inject` is for everything else (and runs after). For sampling keys, prefer `clamp`. For non-sampling keys, use `inject`. There's no enforcement preventing overlap; injecting the same sampling key the route also clamps will resolve to the inject value (route still wins, just via a different mechanism).
+
 ## Telemetry
 
 ```yaml

@@ -162,6 +162,27 @@ Three layers merge per route, in priority order:
 
 Use `clamp` sparingly — it's useful for "always on / always off" guarantees like thinking mode, a ceiling on `max_tokens`, or pinning `temperature` for reproducibility.
 
+### Per-route system prompt and body injection
+
+Two escape hatches for vendor-specific quirks that don't belong in the proxy core:
+
+```yaml
+- virtual_model: gresh-gemma-think
+  backend: vllm-gemma
+  real_model: gemma-4-27b
+  system_prompt:
+    prepend: "<|think|>\n"          # also: append, replace (mutually exclusive)
+
+- virtual_model: gresh-kimi-deep
+  backend: vllm-kimi
+  inject:                            # deep-merged into body, route wins per leaf
+    chat_template_kwargs:
+      thinking_mode: "deep"
+      preserve_thinking: true
+```
+
+`system_prompt` mutates the system message (or `body.system` for Anthropic) before the request leaves the proxy. `inject` deep-merges arbitrary JSON into the request body. Together they cover most "this vendor needs an unusual knob set" cases without the proxy growing per-vendor knowledge. Full semantics in [docs/configuration.md](docs/configuration.md#per-route-system-prompt-and-body-injection).
+
 ### Recipes
 
 #### OpenWebUI

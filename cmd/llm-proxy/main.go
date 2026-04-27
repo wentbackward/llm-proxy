@@ -184,7 +184,8 @@ type vmodel struct {
 func probeBackends(cfg *config.Config) {
 	// Build backend → virtual models index
 	byBackend := make(map[string][]vmodel, len(cfg.Backends))
-	for _, r := range cfg.Routes {
+	for i := range cfg.Routes {
+		r := &cfg.Routes[i]
 		if r.AutoRoute != nil {
 			continue
 		}

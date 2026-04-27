@@ -121,7 +121,8 @@ func (s *Server) Reload(cfg *config.Config) {
 			log.Printf("[reload]   passthrough_unrouted: true but no backend has default: true — falling back to first backend (%s)", def.ID)
 		}
 	}
-	for _, r := range cfg.Routes {
+	for i := range cfg.Routes {
+		r := &cfg.Routes[i]
 		if r.AutoRoute != nil {
 			log.Printf("[reload]   route   %-16s → auto(text=%s, vision=%s)", r.VirtualModel, r.AutoRoute.Text, r.AutoRoute.Vision)
 		} else {
@@ -256,7 +257,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		OwnedBy string `json:"owned_by"`
 	}
 	var data []modelEntry
-	for _, route := range cfg.Routes {
+	for i := range cfg.Routes {
+		route := &cfg.Routes[i]
 		if route.AutoRoute != nil {
 			continue // skip auto-route entries; they resolve to real routes
 		}
@@ -430,6 +432,27 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			entry.Params = res.Params
 		}
 		s.journal.Log(r.Context(), entry)
+	}
+
+	// ── Per-route system prompt and body injection ────────────────────────
+	// Run before translateParams so route-injected chat_template_kwargs
+	// merge cleanly with the enable_thinking translation that follows.
+	if res != nil {
+		if !res.SystemPrompt.IsZero() {
+			applySystemPrompt(body, protocol, res.SystemPrompt)
+		}
+		if len(res.Inject) > 0 {
+			deepMergeInto(body, res.Inject)
+			if ollamaKeys != nil {
+				// Any top-level keys injected on Ollama need to land under
+				// body["options"] like the rest of the sampling params.
+				for k := range res.Inject {
+					if _, ok := body[k]; ok {
+						ollamaKeys[k] = struct{}{}
+					}
+				}
+			}
+		}
 	}
 
 	// ── Protocol-specific param translation ────────────────────────────────
@@ -819,7 +842,8 @@ func (s *Server) rewriteModelsResponse(raw []byte, cfg *config.Config) []byte {
 		contextLength int
 	}
 	byReal := make(map[string][]routeInfo, len(cfg.Routes))
-	for _, r := range cfg.Routes {
+	for i := range cfg.Routes {
+		r := &cfg.Routes[i]
 		if r.AutoRoute != nil || r.RealModel == "" {
 			continue
 		}
@@ -935,6 +959,114 @@ func translateParams(body map[string]interface{}, backend *config.Backend, isStr
 				body["temperature"] = 1.0
 			}
 		}
+	}
+}
+
+// applySystemPrompt mutates body in place to apply the route's system-prompt
+// op according to the protocol's convention for system content. Endpoints
+// without a system concept (completions, embeddings) are skipped silently.
+func applySystemPrompt(body map[string]interface{}, protocol string, op config.SystemPromptOp) {
+	if op.IsZero() {
+		return
+	}
+	if protocol == "anthropic" {
+		applySystemPromptAnthropic(body, op)
+		return
+	}
+	// OpenAI / Ollama: messages[] role=system. If there's no messages array
+	// (completions, embeddings, /api/generate), skip — there's no system
+	// concept to mutate.
+	if _, ok := body["messages"].([]interface{}); !ok {
+		return
+	}
+	applySystemPromptMessages(body, op)
+}
+
+// applySystemPromptMessages handles role=system in the messages array.
+// Array-typed content (multimodal blocks) is left untouched in this first
+// cut — operators rarely use array content for system messages.
+func applySystemPromptMessages(body map[string]interface{}, op config.SystemPromptOp) {
+	messages, _ := body["messages"].([]interface{})
+	sysIdx := -1
+	for i, m := range messages {
+		msg, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role, _ := msg["role"].(string); role == "system" {
+			sysIdx = i
+			break
+		}
+	}
+	var current string
+	if sysIdx >= 0 {
+		msg, _ := messages[sysIdx].(map[string]interface{})
+		// Only mutate string content; leave array content alone.
+		if s, ok := msg["content"].(string); ok {
+			current = s
+		} else {
+			return
+		}
+	}
+	updated := mutateString(current, op)
+	if sysIdx >= 0 {
+		msg, _ := messages[sysIdx].(map[string]interface{})
+		msg["content"] = updated
+	} else {
+		sys := map[string]interface{}{"role": "system", "content": updated}
+		body["messages"] = append([]interface{}{sys}, messages...)
+	}
+}
+
+// applySystemPromptAnthropic handles top-level body.system, which may be a
+// string or an array of content blocks. Replace swaps to a string; prepend/
+// append on an array adds a text block at the appropriate end.
+func applySystemPromptAnthropic(body map[string]interface{}, op config.SystemPromptOp) {
+	switch v := body["system"].(type) {
+	case []interface{}:
+		switch {
+		case op.Replace != "":
+			body["system"] = op.Replace
+		case op.Prepend != "":
+			block := map[string]interface{}{"type": "text", "text": op.Prepend}
+			body["system"] = append([]interface{}{block}, v...)
+		case op.Append != "":
+			block := map[string]interface{}{"type": "text", "text": op.Append}
+			body["system"] = append(v, block)
+		}
+	default:
+		// string or missing
+		current, _ := v.(string)
+		body["system"] = mutateString(current, op)
+	}
+}
+
+// mutateString applies prepend/append/replace to s. The op should have
+// exactly one operation set (validated at config load).
+func mutateString(s string, op config.SystemPromptOp) string {
+	switch {
+	case op.Replace != "":
+		return op.Replace
+	case op.Prepend != "":
+		return op.Prepend + s
+	case op.Append != "":
+		return s + op.Append
+	}
+	return s
+}
+
+// deepMergeInto recursively merges src into dst. Maps are merged per leaf key
+// with src winning. Arrays and scalars are replaced wholesale (concatenation
+// rarely matches intent and breaks idempotency).
+func deepMergeInto(dst, src map[string]interface{}) {
+	for k, v := range src {
+		if srcMap, ok := v.(map[string]interface{}); ok {
+			if dstMap, ok := dst[k].(map[string]interface{}); ok {
+				deepMergeInto(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[k] = v
 	}
 }
 

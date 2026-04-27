@@ -113,6 +113,19 @@ type AutoRoute struct {
 	Vision string `yaml:"vision"`
 }
 
+// SystemPromptOp mutates the system prompt before the request leaves the proxy.
+// Exactly zero or one of Prepend / Append / Replace may be set.
+type SystemPromptOp struct {
+	Prepend string `yaml:"prepend"`
+	Append  string `yaml:"append"`
+	Replace string `yaml:"replace"`
+}
+
+// IsZero reports whether no system-prompt mutation is requested.
+func (s SystemPromptOp) IsZero() bool {
+	return s.Prepend == "" && s.Append == "" && s.Replace == ""
+}
+
 type Route struct {
 	VirtualModel  string                 `yaml:"virtual_model"`
 	Backend       string                 `yaml:"backend"`
@@ -121,6 +134,8 @@ type Route struct {
 	Defaults      map[string]interface{} `yaml:"defaults"`
 	Clamp         map[string]interface{} `yaml:"clamp"`
 	AutoRoute     *AutoRoute             `yaml:"auto_route"`
+	SystemPrompt  SystemPromptOp         `yaml:"system_prompt"` // optional pre-send mutation of the system prompt
+	Inject        map[string]interface{} `yaml:"inject"`        // deep-merged into the body before send; route wins per leaf key
 }
 
 type JournalConfig struct {
@@ -306,7 +321,8 @@ func validateBackends(backends []Backend) (map[string]bool, error) {
 
 func validateRoutes(routes []Route, backendIDs map[string]bool) error {
 	seen := make(map[string]bool, len(routes))
-	for _, r := range routes {
+	for i := range routes {
+		r := &routes[i]
 		if r.VirtualModel == "" {
 			return fmt.Errorf("route missing virtual_model")
 		}
@@ -323,6 +339,20 @@ func validateRoutes(routes []Route, backendIDs map[string]bool) error {
 		}
 		if r.AutoRoute != nil && (r.AutoRoute.Text == "" || r.AutoRoute.Vision == "") {
 			return fmt.Errorf("route %q: auto_route requires text and vision", r.VirtualModel)
+		}
+		// system_prompt: at most one of prepend / append / replace
+		set := 0
+		if r.SystemPrompt.Prepend != "" {
+			set++
+		}
+		if r.SystemPrompt.Append != "" {
+			set++
+		}
+		if r.SystemPrompt.Replace != "" {
+			set++
+		}
+		if set > 1 {
+			return fmt.Errorf("route %q: system_prompt may set at most one of prepend/append/replace", r.VirtualModel)
 		}
 	}
 	return nil
@@ -413,8 +443,8 @@ func isLoopbackHost(h string) bool {
 // VirtualModels returns all configured virtual model names.
 func (c *Config) VirtualModels() []string {
 	names := make([]string, 0, len(c.Routes))
-	for _, r := range c.Routes {
-		names = append(names, r.VirtualModel)
+	for i := range c.Routes {
+		names = append(names, c.Routes[i].VirtualModel)
 	}
 	return names
 }
