@@ -202,7 +202,7 @@ func probeBackends(cfg *config.Config) {
 			continue
 		}
 
-		probeURL := b.BaseURL + "/v1/models"
+		probeURL := b.BaseURL + "/models"
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, probeURL, http.NoBody)
 		if err != nil {
 			log.Printf("[probe] backend %-12s ERROR building request: %v", b.ID, err)
@@ -221,7 +221,7 @@ func probeBackends(cfg *config.Config) {
 
 		if resp.StatusCode == http.StatusNotFound {
 			_ = resp.Body.Close()
-			log.Printf("[probe] backend %-12s OK  (no /v1/models endpoint)", b.ID)
+			log.Printf("[probe] backend %-12s OK  (no /models endpoint)", b.ID)
 			logVirtualModels(byBackend[b.ID])
 			continue
 		}
