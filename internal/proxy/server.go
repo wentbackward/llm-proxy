@@ -229,6 +229,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	if backend := cfg.DefaultBackend(); backend != nil {
 		upURL := backend.BaseURL + "/models"
+		logger.Headers("[proxy] GET /models -> upstream %s (backend=%s)", upURL, backend.ID)
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, http.NoBody)
 		if err == nil {
 			if backend.APIKey != "" {
@@ -244,6 +245,13 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 					_, _ = w.Write(rewritten)
 					return
 				}
+				// Log the upstream error body at level >= 1
+				if logger.Get() >= logger.LevelRequest {
+					logger.Request("[proxy] /models upstream returned %d: %s", resp.StatusCode, string(data)[:min(len(data), 512)])
+				}
+			}
+			if err != nil {
+				logger.Request("[proxy] /models upstream unreachable: %s %v", upURL, err)
 			}
 		}
 		log.Printf("[proxy] /models upstream failed, falling back to static list")
@@ -527,8 +535,9 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			elapsed := time.Since(t0).Seconds()
 			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
-			logger.Request("[%s] %s %s model=%s backend=%s status=502 dur=%.3fs ERROR: %v",
-				rid, r.Method, r.URL.Path, modelName, backendID, elapsed, err)
+			upstreamURL := targetURL.String() + r.URL.Path
+			logger.Request("[%s] %s %s model=%s backend=%s url=%s status=502 dur=%.3fs ERROR: %v",
+				rid, r.Method, r.URL.Path, modelName, backendID, upstreamURL, elapsed, err)
 			log.Printf("[proxy] upstream error backend=%s: %v", backendID, err)
 			capCtx.finishError(t0, "upstream error: "+err.Error())
 			jsonError(w, "upstream error: "+err.Error(), http.StatusBadGateway)
@@ -854,6 +863,11 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 			logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs",
 				rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
+
+			// Log upstream error body at level >= 1
+			if resp.StatusCode != http.StatusOK && logger.Get() >= logger.LevelRequest {
+				logger.Request("[%s] upstream error body: %s", rid, string(data)[:min(len(data), 1024)])
+			}
 
 			if resp.StatusCode == http.StatusOK {
 				extractNonStreamingUsage(data, backendID, realModel, backendType, s.metrics, ctx)
