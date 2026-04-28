@@ -215,10 +215,8 @@ func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleModels forwards /v1/models to the default backend so clients
-// receive real metadata (context_length, etc.) from the upstream. If no
-// backends are configured or the upstream fails, it falls back to the static
-// virtual model list.
+// handleModels returns the list of virtual models defined in routes.
+// It does not delegate to any upstream — the proxy's routes are the source of truth.
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -227,37 +225,6 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	cfg := s.cfg.Load()
 
-	if backend := cfg.DefaultBackend(); backend != nil {
-		upURL := backend.BaseURL + "/models"
-		logger.Headers("[proxy] GET /models -> upstream %s (backend=%s)", upURL, backend.ID)
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, http.NoBody)
-		if err == nil {
-			if backend.APIKey != "" {
-				req.Header.Set("Authorization", "Bearer "+backend.APIKey)
-			}
-			resp, err := http.DefaultClient.Do(req)
-			if err == nil {
-				data, readErr := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusOK && readErr == nil {
-					rewritten := s.rewriteModelsResponse(data, cfg)
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write(rewritten)
-					return
-				}
-				// Log the upstream error body at level >= 1
-				if logger.Get() >= logger.LevelRequest {
-					logger.Request("[proxy] /models upstream returned %d: %s", resp.StatusCode, string(data)[:min(len(data), 512)])
-				}
-			}
-			if err != nil {
-				logger.Request("[proxy] /models upstream unreachable: %s %v", upURL, err)
-			}
-		}
-		log.Printf("[proxy] /models upstream failed, falling back to static list")
-	}
-
-	// Fallback: return virtual model names only
 	type modelEntry struct {
 		ID      string `json:"id"`
 		Object  string `json:"object"`
@@ -900,87 +867,6 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-// rewriteModelsResponse takes the raw upstream /models JSON and rewrites it:
-//   - model entries whose id matches a route's real_model are renamed to the virtual_model name
-//   - if the route has context_length set, context_length is overridden in the entry
-//   - entries with no matching route are dropped (they are internal implementation names)
-func (s *Server) rewriteModelsResponse(raw []byte, cfg *config.Config) []byte {
-	// Build real_model → []route lookup (skip auto-route entries).
-	// Multiple virtual models may share the same real_model.
-	type routeInfo struct {
-		virtualModel  string
-		contextLength int
-	}
-	byReal := make(map[string][]routeInfo, len(cfg.Routes))
-	for i := range cfg.Routes {
-		r := &cfg.Routes[i]
-		if r.AutoRoute != nil || r.RealModel == "" {
-			continue
-		}
-		byReal[r.RealModel] = append(byReal[r.RealModel], routeInfo{r.VirtualModel, r.ContextLength})
-	}
-
-	var upstream struct {
-		Object string                   `json:"object"`
-		Data   []map[string]interface{} `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &upstream); err != nil {
-		return raw // pass through unparseable response unchanged
-	}
-
-	seen := make(map[string]bool) // track which real_models appeared upstream
-	out := make([]map[string]interface{}, 0, len(upstream.Data))
-	for _, entry := range upstream.Data {
-		id, _ := entry["id"].(string)
-		infos, ok := byReal[id]
-		if !ok {
-			continue // not a configured model, hide it
-		}
-		seen[id] = true
-		for i, info := range infos {
-			var e map[string]interface{}
-			if i == 0 {
-				e = entry
-			} else {
-				// clone the entry for additional virtual models
-				e = make(map[string]interface{}, len(entry))
-				for k, v := range entry {
-					e[k] = v
-				}
-			}
-			e["id"] = info.virtualModel
-			if info.contextLength > 0 {
-				e["context_length"] = info.contextLength
-			}
-			out = append(out, e)
-		}
-	}
-
-	// Append routes whose real_model was not in the upstream list (e.g. cloud backends).
-	for realModel, infos := range byReal {
-		if seen[realModel] {
-			continue
-		}
-		for _, info := range infos {
-			e := map[string]interface{}{
-				"id":     info.virtualModel,
-				"object": "model",
-			}
-			if info.contextLength > 0 {
-				e["context_length"] = info.contextLength
-			}
-			out = append(out, e)
-		}
-	}
-
-	result := map[string]interface{}{"object": upstream.Object, "data": out}
-	b, err := json.Marshal(result)
-	if err != nil {
-		return raw
-	}
-	return b
-}
 
 // translateParams handles backend-specific parameter translation in-place.
 func translateParams(body map[string]interface{}, backend *config.Backend, isStreaming bool) {
