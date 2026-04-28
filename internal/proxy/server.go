@@ -215,7 +215,7 @@ func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleModels forwards /v1/models to the first configured backend so clients
+// handleModels forwards /v1/models to the default backend so clients
 // receive real metadata (context_length, etc.) from the upstream. If no
 // backends are configured or the upstream fails, it falls back to the static
 // virtual model list.
@@ -228,7 +228,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Load()
 
 	if backend := cfg.DefaultBackend(); backend != nil {
-		upURL := backend.BaseURL + "/v1/models"
+		upURL := backend.BaseURL + "/models"
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, http.NoBody)
 		if err == nil {
 			if backend.APIKey != "" {
@@ -246,7 +246,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		log.Printf("[proxy] /v1/models upstream failed, falling back to static list")
+		log.Printf("[proxy] /models upstream failed, falling back to static list")
 	}
 
 	// Fallback: return virtual model names only
@@ -275,7 +275,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 // proxyOpts controls per-endpoint behavior differences in the shared proxy pipeline.
 type proxyOpts struct {
-	pathOverride string // if set, forces the backend request path (e.g. "/v1/completions")
+	pathOverride string // if set, forces the backend request path (e.g. "/completions")
 	protocol     string // if set, skips auto-detection (e.g. "openai" for completions)
 }
 
@@ -291,6 +291,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 // proxyRequest is the shared reverse-proxy pipeline used by all endpoints.
 func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxyOpts) {
 	rid := requestID()
+	// Strip /v1/ prefix from the incoming path. The proxy convention is that
+	// clients send /v1/...; the base_url owns the version segment.
+	r.URL.Path = strings.Replace(r.URL.Path, "/v1/", "/", 1)
+	// If pathOverride is set, use it instead (e.g. /completions, /embeddings).
+	if opts.pathOverride != "" {
+		r.URL.Path = opts.pathOverride
+	}
 
 	// ── Read & parse body ──────────────────────────────────────────────────
 	// Cap request body size to avoid OOM on a malicious/misbehaving client.
@@ -636,19 +643,18 @@ func safeHeaders(h http.Header) map[string]string {
 
 // director returns an httputil.ReverseProxy Director that rewrites the request
 // for the given backend. If pathOverride is non-empty, it replaces the request
-// path (used by /v1/completions to force the backend path).
+// path (used by completions/embeddings to force the backend path).
 func director(target *url.URL, backend *config.Backend, body []byte, pathOverride string, routeHeaders config.HeadersOp) func(*http.Request) {
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.Host = target.Host
+		endpointPath := req.URL.Path
 		if pathOverride != "" {
-			req.URL.Path = pathOverride
+			endpointPath = pathOverride
 		}
-		// When pathOverride is empty, req.URL.Path is kept as-is — the proxy
-		// receives /v1/chat/completions and forwards it unchanged. base_url
-		// should be scheme+host only (e.g. http://localhost:3022).
-
+		// Prepend the base_url's path component (e.g. /v1) to the endpoint path.
+		req.URL.Path = target.Path + endpointPath
 		// Auth headers — auth_type overrides the default for the backend type.
 		// Default: "x-api-key" for anthropic, "bearer" for openai.
 		// Explicit "bearer" is needed for OAuth tokens on Anthropic.
@@ -881,7 +887,7 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// rewriteModelsResponse takes the raw upstream /v1/models JSON and rewrites it:
+// rewriteModelsResponse takes the raw upstream /models JSON and rewrites it:
 //   - model entries whose id matches a route's real_model are renamed to the virtual_model name
 //   - if the route has context_length set, context_length is overridden in the entry
 //   - entries with no matching route are dropped (they are internal implementation names)
@@ -1186,8 +1192,8 @@ func logNonStreamingResponse(rid string, data []byte, backendType string) {
 	}
 }
 
-// handleCompletions forwards /v1/completions requests to the backend's
-// /v1/completions endpoint using the same reverse-proxy infrastructure as
+// handleCompletions forwards /v1/completions requests to the backend's /completions
+// endpoint using the same reverse-proxy infrastructure as
 // handleProxy. FIM tokens pass through untouched — no format translation.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1195,19 +1201,19 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.proxyRequest(w, r, proxyOpts{
-		pathOverride: "/v1/completions",
+		pathOverride: "/completions",
 		protocol:     "openai",
 	})
 }
 
-// handleEmbeddings forwards /v1/embeddings requests to the backend.
+// handleEmbeddings forwards /v1/embeddings requests to the backend's /embeddings endpoint.
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	s.proxyRequest(w, r, proxyOpts{
-		pathOverride: "/v1/embeddings",
+		pathOverride: "/embeddings",
 		protocol:     "openai",
 	})
 }

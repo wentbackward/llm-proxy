@@ -115,7 +115,7 @@ func newTestServer(t *testing.T, capture *capturedRequest) (srv *Server, backend
 	cfg := &config.Config{
 		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
-			{ID: "test", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30},
+			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1", TimeoutSeconds: 30},
 		},
 		Routes: []config.Route{
 			{VirtualModel: "test-model", Backend: "test", RealModel: "test-model"},
@@ -399,7 +399,7 @@ func TestCompletions_BackendError(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
-			{ID: "test", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30},
+			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1", TimeoutSeconds: 30},
 		},
 		Routes: []config.Route{
 			{VirtualModel: "test-model", Backend: "test", RealModel: "test-model"},
@@ -567,7 +567,7 @@ func TestSemaphore_LimitsConcurrency(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
-			{ID: "limited", Type: "openai", BaseURL: backend.URL, TimeoutSeconds: 30, MaxConcurrency: 2},
+			{ID: "limited", Type: "openai", BaseURL: backend.URL + "/v1", TimeoutSeconds: 30, MaxConcurrency: 2},
 		},
 		Routes: []config.Route{
 			{VirtualModel: "test-model", Backend: "limited", RealModel: "test-model"},
@@ -701,7 +701,7 @@ func TestReload_NewRoutesResolve(t *testing.T) {
 backends:
   - id: b1
     type: openai
-    base_url: %q
+    base_url: "%s/v1"
 routes:
   - virtual_model: model-a
     backend: b1
@@ -727,7 +727,7 @@ routes:
 backends:
   - id: b1
     type: openai
-    base_url: %q
+    base_url: "%s/v1"
 routes:
   - virtual_model: model-a
     backend: b1
@@ -852,7 +852,7 @@ func TestUnknownModel_RejectedByDefault(t *testing.T) {
 backends:
   - id: b1
     type: openai
-    base_url: %q
+    base_url: "%s/v1"
 routes:
   - virtual_model: my-model
     backend: b1
@@ -914,7 +914,7 @@ server:
 backends:
   - id: b1
     type: openai
-    base_url: %q
+    base_url: "%s/v1"
 routes:
   - virtual_model: my-model
     backend: b1

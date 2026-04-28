@@ -44,7 +44,7 @@ server:
 backends:
   - id: be
     type: %s
-    base_url: %q
+    base_url: "%s/v1"
     timeout_seconds: 30
 routes:
   - virtual_model: m
@@ -205,7 +205,7 @@ server:
 backends:
   - id: be
     type: anthropic
-    base_url: %q
+    base_url: "%s/v1"
     timeout_seconds: 30
 routes:
   - virtual_model: m
@@ -254,7 +254,7 @@ server:
 backends:
   - id: be
     type: anthropic
-    base_url: %q
+    base_url: "%s/v1"
     timeout_seconds: 30
 routes:
   - virtual_model: m
@@ -309,7 +309,7 @@ server:
 backends:
   - id: be
     type: openai
-    base_url: %q
+    base_url: "%s/v1"
     timeout_seconds: 30
 routes:
   - virtual_model: m

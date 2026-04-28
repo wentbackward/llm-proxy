@@ -302,7 +302,6 @@ func applyDefaults(cfg *Config) {
 			cfg.Backends[i].TimeoutSeconds = 300
 		}
 		if u, err := url.Parse(cfg.Backends[i].BaseURL); err == nil {
-			u.Path = strings.TrimSuffix(u.Path, "/v1")
 			cfg.Backends[i].BaseURL = u.String()
 		}
 	}

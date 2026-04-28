@@ -41,7 +41,7 @@ server:
 backends:
   - id: be
     type: openai
-    base_url: %q
+    base_url: "%s/v1"
     timeout_seconds: 30%s
 routes:
   - virtual_model: m
