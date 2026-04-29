@@ -20,8 +20,11 @@ const BuildMode = "debug"
 // logs so operators can't miss that this build includes prompt-bearing
 // capabilities. Build with `-tags hardened` to strip them.
 func logStartupBanner() {
-	banner := fmt.Sprintf(`
-===============================================================================
+	banner := fmt.Sprintf(` ____  _____   __  ___ _   _ ___ _    ___
+|   \| __\ \/ /  | _ ) | | |_ _| |  |   \
+| |)| _|  \ /   | _ \ |_| || || |__| |) |
+|___/|___| \/   |___/\___/|___|____|___/
+
   llm-proxy %s — DEBUG BUILD — includes features that can expose prompt contents:
     * SIGUSR1 writes full request/response bodies to disk (when enabled)
     * LOG_LEVEL=3 logs 80 bytes of request bodies
@@ -29,8 +32,7 @@ func logStartupBanner() {
     * The request journal records up to 2KB of system + 8KB of last user text
 
   For production use, build with:  go build -tags hardened ./cmd/llm-proxy
-  See docs/security.md for details.
-===============================================================================`, Version)
+  See docs/security.md for details.`, Version)
 	log.Print(banner)
 }
 
