@@ -101,6 +101,7 @@ type Backend struct {
 	BaseURL        string    `yaml:"base_url"`
 	APIKey         string    `yaml:"api_key"`
 	AuthType       string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
+	Group          string    `yaml:"group"`     // optional; LB group name
 	TimeoutSeconds int       `yaml:"timeout_seconds"`
 	MaxConcurrency int       `yaml:"max_concurrency"` // 0 = unlimited; limits in-flight requests to this backend
 	SkipProbe      bool      `yaml:"skip_probe"`      // skip /v1/models health check at startup/SIGHUP
@@ -150,6 +151,7 @@ func (h HeadersOp) IsZero() bool {
 type Route struct {
 	VirtualModel  string                 `yaml:"virtual_model"`
 	Backend       string                 `yaml:"backend"`
+	BackendGroup  string                 `yaml:"backend_group"` // LB group reference; mutually exclusive with backend:
 	RealModel     string                 `yaml:"real_model"`
 	ContextLength int                    `yaml:"context_length"` // overrides upstream value in /v1/models; 0 = pass through
 	Defaults      map[string]interface{} `yaml:"defaults"`
@@ -181,6 +183,7 @@ type Config struct {
 	SigMessageCapture SigMessageCaptureConfig `yaml:"sig_message_capture"`
 	Backends          []Backend               `yaml:"backends"`
 	Routes            []Route                 `yaml:"routes"`
+	Groups            map[string]*GroupConfig `yaml:"groups"`
 
 	backendByID  map[string]*Backend
 	routeByModel map[string]*Route
@@ -305,6 +308,38 @@ func applyDefaults(cfg *Config) {
 			cfg.Backends[i].BaseURL = u.String()
 		}
 	}
+	for _, g := range cfg.Groups {
+		if g.Strategy == "" {
+			g.Strategy = "sticky_least_loaded"
+		}
+		if g.Affinity.Key == "" {
+			g.Affinity.Key = "canonical_prefix"
+		}
+		if g.Affinity.PrefixBytes == 0 {
+			g.Affinity.PrefixBytes = 1024
+		}
+		if g.Affinity.TTLSeconds == 0 {
+			g.Affinity.TTLSeconds = 3600
+		}
+		if g.Affinity.MaxEntries == 0 {
+			g.Affinity.MaxEntries = 10000
+		}
+		if g.Overload.StaleMetricsAction == "" {
+			g.Overload.StaleMetricsAction = "pin"
+		}
+		if g.HealthCheck.Path == "" {
+			g.HealthCheck.Path = "/v1/models"
+		}
+		if g.HealthCheck.IntervalSeconds == 0 {
+			g.HealthCheck.IntervalSeconds = 10
+		}
+		if g.HealthCheck.TimeoutSeconds == 0 {
+			g.HealthCheck.TimeoutSeconds = 2
+		}
+		if g.HealthCheck.UnhealthyAfter == 0 {
+			g.HealthCheck.UnhealthyAfter = 3
+		}
+	}
 }
 
 func validate(cfg *Config) error {
@@ -360,6 +395,13 @@ func validateRoutes(routes []Route, backendIDs map[string]bool) error {
 		}
 		if r.AutoRoute != nil && (r.AutoRoute.Text == "" || r.AutoRoute.Vision == "") {
 			return fmt.Errorf("route %q: auto_route requires text and vision", r.VirtualModel)
+		}
+		// backend: and backend_group: are mutually exclusive
+		if r.Backend != "" && r.BackendGroup != "" {
+			return fmt.Errorf("route %q: must specify exactly one of backend or backend_group", r.VirtualModel)
+		}
+		if r.Backend == "" && r.BackendGroup == "" && r.AutoRoute == nil {
+			return fmt.Errorf("route %q: must have backend, backend_group, or auto_route", r.VirtualModel)
 		}
 		// system_prompt: at most one of prepend / append / replace
 		set := 0
@@ -468,4 +510,15 @@ func (c *Config) VirtualModels() []string {
 		names = append(names, c.Routes[i].VirtualModel)
 	}
 	return names
+}
+
+// GroupBackends returns all backends belonging to the named group.
+func (c *Config) GroupBackends(group string) []*Backend {
+	var out []*Backend
+	for i := range c.Backends {
+		if c.Backends[i].Group == group {
+			out = append(out, &c.Backends[i])
+		}
+	}
+	return out
 }
