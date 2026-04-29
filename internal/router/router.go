@@ -33,6 +33,9 @@ type Resolution struct {
 	// Headers is the route's optional outbound header manipulation. Applied
 	// after backend.Headers so route wins on conflict.
 	Headers config.HeadersOp
+	// Group is the LB group name when the route uses backend_group.
+	// Empty string means single-backend mode (existing behavior).
+	Group string
 }
 
 // Router resolves virtual model names.
@@ -71,9 +74,25 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 		return r.resolve(target, body, depth+1)
 	}
 
-	backend, ok := r.cfg.Backend(route.Backend)
-	if !ok {
-		return nil, fmt.Errorf("route %q references unknown backend %q", modelName, route.Backend)
+	var backend *config.Backend
+	var group string
+
+	if route.BackendGroup != "" {
+		// LB group route — backend is selected by the Balancer at runtime.
+		// Pick the first backend for model resolution (real_model, etc.).
+		group = route.BackendGroup
+		backends := r.cfg.GroupBackends(route.BackendGroup)
+		if len(backends) == 0 {
+			return nil, fmt.Errorf("route %q: group %q has no backends", modelName, route.BackendGroup)
+		}
+		backend = backends[0]
+	} else {
+		// Single-backend route (existing path)
+		var ok bool
+		backend, ok = r.cfg.Backend(route.Backend)
+		if !ok {
+			return nil, fmt.Errorf("route %q references unknown backend %q", modelName, route.Backend)
+		}
 	}
 
 	params := mergeParams(route.Defaults, body, route.Clamp)
@@ -90,6 +109,7 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 		SystemPrompt: route.SystemPrompt,
 		Inject:       route.Inject,
 		Headers:      route.Headers,
+		Group:        group,
 	}, nil
 }
 
