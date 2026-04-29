@@ -752,3 +752,113 @@ routes:
 		t.Error("expanded backend vllm-3041 not found")
 	}
 }
+
+// ── Group Validation ─────────────────────────────────────────────────────────
+
+func TestGroup_MutuallyExclusiveBackendAndGroup(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+    group: g1
+groups:
+  g1:
+routes:
+  - virtual_model: m
+    backend: a
+    backend_group: g1
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error: backend and backend_group are mutually exclusive")
+	}
+}
+
+func TestGroup_GroupBackends(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+    group: g1
+  - id: b
+    type: openai
+    base_url: "http://otherhost"
+    group: g1
+  - id: c
+    type: openai
+    base_url: "http://third"
+groups:
+  g1:
+routes:
+  - virtual_model: m
+    backend_group: g1
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := cfg.GroupBackends("g1")
+	if len(bs) != 2 {
+		t.Errorf("expected 2 backends in g1, got %d", len(bs))
+	}
+}
+
+func TestGroup_DefaultsApplied(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: a
+    type: openai
+    base_url: "http://localhost"
+    group: g1
+groups:
+  g1:
+routes:
+  - virtual_model: m
+    backend_group: g1
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.Groups["g1"]
+	if g.Strategy != "sticky_least_loaded" {
+		t.Errorf("strategy default: got %q", g.Strategy)
+	}
+	if g.Affinity.PrefixBytes != 1024 {
+		t.Errorf("prefix_bytes default: got %d", g.Affinity.PrefixBytes)
+	}
+	if g.HealthCheck.IntervalSeconds != 10 {
+		t.Errorf("health_check.interval_seconds default: got %d", g.HealthCheck.IntervalSeconds)
+	}
+}
+
+func TestGroup_PortExpansionPreservesGroup(t *testing.T) {
+	path := writeTemp(t, `
+backends:
+  - id: vllm-{port}
+    type: openai
+    base_url: "http://127.0.0.1:{port}"
+    group: coder-cluster
+    ports: [3040, 3041]
+groups:
+  coder-cluster:
+routes:
+  - virtual_model: m
+    backend_group: coder-cluster
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := cfg.GroupBackends("coder-cluster")
+	if len(bs) != 2 {
+		t.Errorf("expected 2 expanded backends in group, got %d", len(bs))
+	}
+	for _, b := range bs {
+		if b.Group != "coder-cluster" {
+			t.Errorf("expanded backend %s lost group assignment", b.ID)
+		}
+	}
+}

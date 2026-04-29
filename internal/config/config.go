@@ -308,7 +308,11 @@ func applyDefaults(cfg *Config) {
 			cfg.Backends[i].BaseURL = u.String()
 		}
 	}
-	for _, g := range cfg.Groups {
+	for name, g := range cfg.Groups {
+		if g == nil {
+			cfg.Groups[name] = &GroupConfig{}
+			g = cfg.Groups[name]
+		}
 		if g.Strategy == "" {
 			g.Strategy = "sticky_least_loaded"
 		}
@@ -387,21 +391,18 @@ func validateRoutes(routes []Route, backendIDs map[string]bool) error {
 		}
 		seen[r.VirtualModel] = true
 
-		if r.AutoRoute == nil && r.Backend == "" {
-			return fmt.Errorf("route %q: must have backend or auto_route", r.VirtualModel)
-		}
-		if r.Backend != "" && !backendIDs[r.Backend] {
-			return fmt.Errorf("route %q: unknown backend %q", r.VirtualModel, r.Backend)
-		}
-		if r.AutoRoute != nil && (r.AutoRoute.Text == "" || r.AutoRoute.Vision == "") {
-			return fmt.Errorf("route %q: auto_route requires text and vision", r.VirtualModel)
-		}
 		// backend: and backend_group: are mutually exclusive
 		if r.Backend != "" && r.BackendGroup != "" {
 			return fmt.Errorf("route %q: must specify exactly one of backend or backend_group", r.VirtualModel)
 		}
 		if r.Backend == "" && r.BackendGroup == "" && r.AutoRoute == nil {
 			return fmt.Errorf("route %q: must have backend, backend_group, or auto_route", r.VirtualModel)
+		}
+		if r.Backend != "" && !backendIDs[r.Backend] {
+			return fmt.Errorf("route %q: unknown backend %q", r.VirtualModel, r.Backend)
+		}
+		if r.AutoRoute != nil && (r.AutoRoute.Text == "" || r.AutoRoute.Vision == "") {
+			return fmt.Errorf("route %q: auto_route requires text and vision", r.VirtualModel)
 		}
 		// system_prompt: at most one of prepend / append / replace
 		set := 0
