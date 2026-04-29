@@ -88,6 +88,30 @@ backends:
     max_concurrency: 5   # optional: limit in-flight requests to this backend (0 = unlimited)
     skip_probe: true
 
+# --- Load-balanced groups ---------------------------------------------------
+#
+# Define groups to distribute traffic across multiple backends.
+# Add group: <name> to a backend to join it, then use backend_group: in a route.
+#
+# groups:
+#   coder-cluster:
+#     strategy: sticky_least_loaded   # default; also: least_loaded, round_robin, single
+#     affinity:
+#       key: canonical_prefix         # hash conversation prefix for cache locality
+#       prefix_bytes: 1024
+#       ttl_seconds: 3600
+#       max_entries: 10000
+#     overload:
+#       max_concurrency: 0            # 0 = unlimited
+#     health_check:
+#       path: /v1/models
+#       interval_seconds: 10
+#       timeout_seconds: 2
+#       unhealthy_after: 3
+#
+# Example: add group: coder-cluster to two vLLM backends above, uncomment the
+# group definition, and use backend_group in a route below.
+
 # Virtual model aliases with optional param profiles
 # Omit routes entirely to run as a pure transparent proxy
 routes:

@@ -334,6 +334,72 @@ routes:
 
 `httputil.ReverseProxy` auto-appends the client IP to `X-Forwarded-For` after the request leaves the proxy's hands. The standard library's documented opt-out is to set the slot to nil, which the proxy does internally when you list `X-Forwarded-For` under `remove`. Operators just need to add it to `remove` like any other header — the special handling is invisible.
 
+## Load Balancing
+
+When a route needs to distribute traffic across multiple backends, define a **group** and assign backends to it. Routes reference the group via `backend_group:` instead of `backend:`.
+
+### Groups
+
+```yaml
+groups:
+  coder-cluster:
+    strategy: sticky_least_loaded  # default; also: least_loaded, round_robin, single
+    affinity:
+      key: canonical_prefix        # default; also: none, header:X-Session-ID
+      prefix_bytes: 1024           # default: 1024
+      ttl_seconds: 3600            # default: 3600
+      max_entries: 10000           # default: 10000
+    overload:
+      max_concurrency: 0           # 0 = unlimited; per-backend in-flight cap
+    health_check:
+      path: /v1/models             # default
+      interval_seconds: 10         # default
+      timeout_seconds: 2           # default
+      unhealthy_after: 3           # default
+```
+
+### Strategies
+
+- **`sticky_least_loaded`** (default) — pins a session to a backend by affinity key, falling back to least-loaded when the pinned target is overloaded or unavailable. Maximizes KV-cache hit rate for multi-turn conversations.
+- **`least_loaded`** — always picks the backend with the fewest in-flight requests. No stickiness.
+- **`round_robin`** — cycles through backends in order. Simple, uniform distribution.
+- **`single`** — always uses the first backend in the group. Equivalent to a single-backend route.
+
+### Affinity keys
+
+- **`canonical_prefix`** (default) — hashes the leading N bytes of the conversation (system + user messages) to produce a stable key. Same conversation prefix → same backend.
+- **`header:NAME`** — uses the value of the named HTTP header as the affinity key. Useful for passing session IDs from the client.
+- **`none`** — no affinity. Every request is distributed independently.
+
+### Backend assignment
+
+Add `group:` to a backend to join it to a named group:
+
+```yaml
+backends:
+  - id: vllm-1
+    type: openai
+    base_url: "http://10.0.0.1:8000/v1"
+    group: coder-cluster
+  - id: vllm-2
+    type: openai
+    base_url: "http://10.0.0.2:8000/v1"
+    group: coder-cluster
+```
+
+### Route configuration
+
+Use `backend_group:` instead of `backend:` to route through a group:
+
+```yaml
+routes:
+  - virtual_model: coder
+    backend_group: coder-cluster
+    real_model: qwen2.5-32b-instruct
+```
+
+`backend:` and `backend_group:` are mutually exclusive — a route must specify exactly one.
+
 ## Telemetry
 
 ```yaml
