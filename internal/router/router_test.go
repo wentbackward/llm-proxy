@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/hikyaku/internal/config"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────

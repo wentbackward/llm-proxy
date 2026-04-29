@@ -4,12 +4,12 @@ VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo dev)
 LDFLAGS = -ldflags '-X main.Version=$(VERSION)'
 
 build:
-	go build $(LDFLAGS) -o bin/llm-proxy ./cmd/llm-proxy
+	go build $(LDFLAGS) -o bin/hikyaku ./cmd/hikyaku
 
 # Hardened build strips the SIGUSR1 capture feature, log levels 3-4, and
 # the prompt text from journal entries. See docs/security.md.
 build-hardened:
-	go build -tags hardened $(LDFLAGS) -o bin/llm-proxy-hardened ./cmd/llm-proxy
+	go build -tags hardened $(LDFLAGS) -o bin/hikyaku-hardened ./cmd/hikyaku
 
 test:
 	go test ./... -v -race -count=1
@@ -44,7 +44,7 @@ check: lint test build
 
 # Same as `check` but for the hardened build variant.
 check-hardened: lint-hardened
-	go build -tags hardened ./cmd/llm-proxy
+	go build -tags hardened ./cmd/hikyaku
 
 # One-time setup for contributors: point git at the version-controlled
 # .githooks/ directory so pre-commit runs golangci-lint before each commit.
@@ -53,7 +53,7 @@ install-hooks:
 	@echo "pre-commit hook installed (.githooks/pre-commit)"
 
 run:
-	CONFIG_PATH=config.example.yaml go run ./cmd/llm-proxy
+	CONFIG_PATH=config.example.yaml go run ./cmd/hikyaku
 
 docker-build:
-	docker build -t llm-proxy .
+	docker build -t hikyaku .

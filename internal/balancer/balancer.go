@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/hikyaku/internal/config"
 )
 
 // Balancer coordinates backend state, health checking, and selection

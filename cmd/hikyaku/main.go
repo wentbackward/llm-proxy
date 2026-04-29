@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
-	"github.com/wentbackward/llm-proxy/internal/journal"
-	"github.com/wentbackward/llm-proxy/internal/logger"
-	"github.com/wentbackward/llm-proxy/internal/proxy"
-	"github.com/wentbackward/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/hikyaku/internal/config"
+	"github.com/wentbackward/hikyaku/internal/journal"
+	"github.com/wentbackward/hikyaku/internal/logger"
+	"github.com/wentbackward/hikyaku/internal/proxy"
+	"github.com/wentbackward/hikyaku/internal/telemetry"
 )
 
 // Version is set at build time via -ldflags.
@@ -54,7 +54,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("journal: %v", err)
 		}
-		log.Println("[llm-proxy] journal enabled")
+		log.Println("[hikyaku] journal enabled")
 	}
 
 	// ── Startup backend probes ─────────────────────────────────────────────
@@ -90,13 +90,13 @@ func main() {
 	go func() {
 		tls := cfg.Server.TLS
 		if tls.Cert != "" && tls.Key != "" {
-			log.Printf("[llm-proxy] listening on %s (TLS)", proxyAddr)
+			log.Printf("[hikyaku] listening on %s (TLS)", proxyAddr)
 			if err := proxyServer.ListenAndServeTLS(tls.Cert, tls.Key); err != http.ErrServerClosed {
 				log.Fatalf("proxy server: %v", err)
 			}
 		} else {
 			// Validated earlier: allow_plaintext must be true to reach here.
-			log.Printf("[llm-proxy] listening on %s (PLAINTEXT — allow_plaintext: true)", proxyAddr)
+			log.Printf("[hikyaku] listening on %s (PLAINTEXT — allow_plaintext: true)", proxyAddr)
 			if err := proxyServer.ListenAndServe(); err != http.ErrServerClosed {
 				log.Fatalf("proxy server: %v", err)
 			}
@@ -107,13 +107,13 @@ func main() {
 		go func() {
 			mt := cfg.Telemetry.Prometheus.TLS
 			if mt.Cert != "" && mt.Key != "" {
-				log.Printf("[llm-proxy] metrics on %s:%d%s (TLS)",
+				log.Printf("[hikyaku] metrics on %s:%d%s (TLS)",
 					cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
 				if err := metricsServer.ListenAndServeTLS(mt.Cert, mt.Key); err != http.ErrServerClosed {
 					log.Fatalf("metrics server: %v", err)
 				}
 			} else {
-				log.Printf("[llm-proxy] metrics on %s:%d%s",
+				log.Printf("[hikyaku] metrics on %s:%d%s",
 					cfg.Telemetry.Prometheus.Host, cfg.Telemetry.Prometheus.Port, cfg.Telemetry.Prometheus.Path)
 				if err := metricsServer.ListenAndServe(); err != http.ErrServerClosed {
 					log.Fatalf("metrics server: %v", err)
@@ -130,18 +130,18 @@ func main() {
 
 	go func() {
 		for range hup {
-			log.Println("[llm-proxy] SIGHUP received — reloading config")
+			log.Println("[hikyaku] SIGHUP received — reloading config")
 			newCfg, err := config.Load(cfgPath)
 			switch {
 			case err != nil:
-				log.Printf("[llm-proxy] config reload failed: %v (keeping old config)", err)
+				log.Printf("[hikyaku] config reload failed: %v (keeping old config)", err)
 				logger.Apply(srv.Config().Server.LogLevel)
 			default:
 				// Enforce TLS policy on reload too — an operator adding a
 				// network-facing metrics bind shouldn't silently swap to
 				// plaintext just because they used SIGHUP instead of restart.
 				if perr := newCfg.ValidateListenPolicy(); perr != nil {
-					log.Printf("[llm-proxy] config reload rejected: %v (keeping old config)", perr)
+					log.Printf("[hikyaku] config reload rejected: %v (keeping old config)", perr)
 					logger.Apply(srv.Config().Server.LogLevel)
 				} else {
 					srv.Reload(newCfg)
@@ -158,24 +158,24 @@ func main() {
 
 	<-quit
 
-	log.Println("[llm-proxy] shutting down...")
+	log.Println("[hikyaku] shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := proxyServer.Shutdown(ctx); err != nil {
-		log.Printf("[llm-proxy] proxy shutdown: %v", err)
+		log.Printf("[hikyaku] proxy shutdown: %v", err)
 	}
 	if srv.Balancer() != nil {
 		srv.Balancer().Stop()
 	}
 	if metricsServer != nil {
 		if err := metricsServer.Shutdown(ctx); err != nil {
-			log.Printf("[llm-proxy] metrics shutdown: %v", err)
+			log.Printf("[hikyaku] metrics shutdown: %v", err)
 		}
 	}
 	if j != nil {
 		if err := j.Shutdown(ctx); err != nil {
-			log.Printf("[llm-proxy] journal shutdown: %v", err)
+			log.Printf("[hikyaku] journal shutdown: %v", err)
 		}
 	}
 }

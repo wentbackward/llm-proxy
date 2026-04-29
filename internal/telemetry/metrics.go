@@ -33,7 +33,7 @@ func Init() (*Metrics, http.Handler, error) {
 	}
 
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
-	meter := provider.Meter("llm-proxy")
+	meter := provider.Meter("hikyaku")
 
 	reqDur, err := meter.Float64Histogram("llm_request_duration_seconds",
 		metric.WithDescription("End-to-end request duration in seconds"),

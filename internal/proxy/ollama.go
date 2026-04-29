@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/hikyaku/internal/config"
 )
 
 // ── Ollama native endpoints ──────────────────────────────────────────────────

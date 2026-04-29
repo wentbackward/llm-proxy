@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/wentbackward/llm-proxy/internal/proxy"
+	"github.com/wentbackward/hikyaku/internal/proxy"
 )
 
 // BuildMode identifies this binary to operators at startup and in docs.
@@ -25,9 +25,9 @@ func logStartupBanner() {
 | |)| _|  \ /   | _ \ |_| || || |__| |) |
 |___/|___| \/   |___/\___/|___|____|___/
 
-  llm-proxy %s — INSPECT`, Version)
+  hikyaku %s — INSPECT`, Version)
 	} else {
-		log.Printf("[llm-proxy] %s — INSPECT", Version)
+		log.Printf("[hikyaku] %s — INSPECT", Version)
 	}
 }
 
@@ -39,11 +39,11 @@ func installCaptureSignal(srv *proxy.Server) {
 		for range usr1 {
 			c := srv.Capture()
 			if c == nil {
-				log.Println("[llm-proxy] SIGUSR1 received — message capture disabled; enable sig_message_capture in config")
+				log.Println("[hikyaku] SIGUSR1 received — message capture disabled; enable sig_message_capture in config")
 				continue
 			}
 			n := c.Arm()
-			log.Printf("[llm-proxy] SIGUSR1 received — capturing next %d requests to %s", n, c.OutputFolder())
+			log.Printf("[hikyaku] SIGUSR1 received — capturing next %d requests to %s", n, c.OutputFolder())
 		}
 	}()
 }

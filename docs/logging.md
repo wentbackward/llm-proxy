@@ -22,7 +22,7 @@ Probe output is always printed regardless of log level.
 Send `SIGHUP` to reload the entire config, log level, and re-probe all backends without restarting:
 
 ```bash
-docker kill --signal=HUP llm-proxy
+docker kill --signal=HUP hikyaku
 ```
 
 If the new config fails to parse, the old config is kept and an error is logged. In-flight requests continue with the old config; new requests pick up the new config.
@@ -131,7 +131,7 @@ Both `enabled: true` and a non-empty `output_folder` are required for the featur
 Send `SIGUSR1` to the proxy process:
 
 ```bash
-docker kill --signal=USR1 llm-proxy
+docker kill --signal=USR1 hikyaku
 ```
 
 The next `max_messages` proxied requests are each written as one JSON file to the output folder, then the window closes automatically. Send `SIGUSR1` again to re-arm. If the feature is disabled in config, the signal is logged and ignored.

@@ -10,7 +10,7 @@
 //
 // Set via server.log_level in config.yaml, or LOG_LEVEL=<n> in the
 // environment (env wins when both are set). Send SIGHUP to reload:
-// docker kill --signal=HUP llm-proxy
+// docker kill --signal=HUP hikyaku
 package logger
 
 import (

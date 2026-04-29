@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
-	"github.com/wentbackward/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/hikyaku/internal/config"
+	"github.com/wentbackward/hikyaku/internal/telemetry"
 )
 
 // newHeadersServer wires a real config (loaded via config.Load) pointing at

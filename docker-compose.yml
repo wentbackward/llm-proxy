@@ -1,9 +1,9 @@
 services:
-  llm-proxy:
+  hikyaku:
     build: .
     # Or pull the prebuilt image instead of building locally:
-    # image: ghcr.io/wentbackward/llm-proxy:latest
-    container_name: llm-proxy
+    # image: ghcr.io/wentbackward/hikyaku:latest
+    container_name: hikyaku
     restart: unless-stopped
     logging:
       driver: json-file

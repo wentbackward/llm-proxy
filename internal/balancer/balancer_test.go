@@ -3,7 +3,7 @@ package balancer
 import (
 	"testing"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
+	"github.com/wentbackward/hikyaku/internal/config"
 )
 
 func testConfigWithGroup(t *testing.T) *config.Config {

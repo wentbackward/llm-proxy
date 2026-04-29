@@ -293,7 +293,7 @@ backends:
     headers:
       add:
         X-Corp-Auth: "${CORP_TOKEN}"        # static, applied to every request to this backend
-        X-Service-Account: "llm-proxy"
+        X-Service-Account: "hikyaku"
 
 routes:
   - virtual_model: gresh-internal

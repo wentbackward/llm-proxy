@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wentbackward/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/hikyaku/internal/telemetry"
 )
 
 const maxContentCapture = 32768 // 32KB cap for L4 response capture

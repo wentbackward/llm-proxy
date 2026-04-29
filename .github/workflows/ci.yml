@@ -30,7 +30,7 @@ jobs:
         run: go test ./... -race -count=1
 
       - name: Build
-        run: go build ./cmd/llm-proxy
+        run: go build ./cmd/hikyaku
 
   lint:
     runs-on: ubuntu-latest
@@ -54,4 +54,4 @@ jobs:
           args: --build-tags hardened
 
       - name: Build hardened
-        run: go build -tags hardened ./cmd/llm-proxy
+        run: go build -tags hardened ./cmd/hikyaku

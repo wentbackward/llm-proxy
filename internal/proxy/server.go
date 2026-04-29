@@ -21,13 +21,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/wentbackward/llm-proxy/internal/balancer"
-	"github.com/wentbackward/llm-proxy/internal/capture"
-	"github.com/wentbackward/llm-proxy/internal/config"
-	"github.com/wentbackward/llm-proxy/internal/journal"
-	"github.com/wentbackward/llm-proxy/internal/logger"
-	"github.com/wentbackward/llm-proxy/internal/router"
-	"github.com/wentbackward/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/hikyaku/internal/balancer"
+	"github.com/wentbackward/hikyaku/internal/capture"
+	"github.com/wentbackward/hikyaku/internal/config"
+	"github.com/wentbackward/hikyaku/internal/journal"
+	"github.com/wentbackward/hikyaku/internal/logger"
+	"github.com/wentbackward/hikyaku/internal/router"
+	"github.com/wentbackward/hikyaku/internal/telemetry"
 )
 
 // requestID generates a short random hex string for correlating log lines.
@@ -235,7 +235,7 @@ func (s *Server) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 		expected := []byte("Bearer " + key)
 		got := []byte(r.Header.Get("Authorization"))
 		if subtle.ConstantTimeCompare(got, expected) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-proxy"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="hikyaku"`)
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -269,7 +269,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			ID:      route.VirtualModel,
 			Object:  "model",
 			Created: 0,
-			OwnedBy: "llm-proxy",
+			OwnedBy: "hikyaku",
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

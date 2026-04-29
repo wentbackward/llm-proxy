@@ -31,4 +31,4 @@ All metrics are exported via OpenTelemetry with a Prometheus exporter. Default e
 
 ## Grafana
 
-Add a Prometheus data source pointing at `http://llm-proxy:9091` (or wherever your metrics endpoint is). All metrics use the `llm_` prefix for easy discovery.
+Add a Prometheus data source pointing at `http://hikyaku:9091` (or wherever your metrics endpoint is). All metrics use the `llm_` prefix for easy discovery.

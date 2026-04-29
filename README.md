@@ -1,16 +1,16 @@
-# llm-proxy
+# hikyaku
 
-[![CI](https://github.com/wentbackward/llm-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/wentbackward/llm-proxy/actions/workflows/ci.yml)
-[![Release](https://github.com/wentbackward/llm-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/wentbackward/llm-proxy/actions/workflows/release.yml)
-[![Docker](https://img.shields.io/badge/ghcr.io-wentbackward%2Fllm--proxy-blue?logo=docker)](https://github.com/wentbackward/llm-proxy/pkgs/container/llm-proxy)
-[![Go Report Card](https://goreportcard.com/badge/github.com/wentbackward/llm-proxy)](https://goreportcard.com/report/github.com/wentbackward/llm-proxy)
+[![CI](https://github.com/wentbackward/hikyaku/actions/workflows/ci.yml/badge.svg)](https://github.com/wentbackward/hikyaku/actions/workflows/ci.yml)
+[![Release](https://github.com/wentbackward/hikyaku/actions/workflows/release.yml/badge.svg)](https://github.com/wentbackward/hikyaku/actions/workflows/release.yml)
+[![Docker](https://img.shields.io/badge/ghcr.io-wentbackward%2Fllm--proxy-blue?logo=docker)](https://github.com/wentbackward/hikyaku/pkgs/container/hikyaku)
+[![Go Report Card](https://goreportcard.com/badge/github.com/wentbackward/hikyaku)](https://goreportcard.com/report/github.com/wentbackward/hikyaku)
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Virtualize models from any provider — local or cloud — and switch between them in your client UI.
 
 ```
-client → llm-proxy:4000/v1 → vLLM (local)
+client → hikyaku:4000/v1 → vLLM (local)
                              → OpenAI (cloud)
                              → HuggingFace (cloud)
                              → any OpenAI-compatible API
@@ -215,7 +215,7 @@ Backend headers apply first; route headers apply on top, route wins on conflict.
 
 Admin Panel → Settings → Connections → add an OpenAI API:
 
-- Base URL: `http://llm-proxy:4000/v1`
+- Base URL: `http://hikyaku:4000/v1`
 - API Key: whatever you set as `server.api_key`
 
 Click the refresh icon on the connection. OpenWebUI calls `/v1/models` and populates its dropdown with your virtual model names. That's it.
@@ -230,7 +230,7 @@ If the version of LiteLLM you're running *doesn't* strip the prefix, you'll see 
 
 **Clients speaking Ollama native (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`):**
 
-- Base URL: `http://llm-proxy:4000` (no `/api` suffix — llm-proxy exposes those paths directly)
+- Base URL: `http://hikyaku:4000` (no `/api` suffix — hikyaku exposes those paths directly)
 - API key: your `server.api_key`
 
 Configure a route pointing at a `type: ollama` backend. Ollama's sampling params live under `"options"` in the request body; route `defaults` and `clamp` merge into that nested object automatically. Pure passthrough — the proxy doesn't reshape messages or reinterpret parameters the way Ollama's OpenAI-compat layer does.
@@ -245,7 +245,7 @@ Add a provider block to `~/.opencode/config.json`:
 {
   "providers": {
     "local": {
-      "baseUrl": "http://llm-proxy:4000/v1",
+      "baseUrl": "http://hikyaku:4000/v1",
       "apiKey": "nokey",
       "api": "openai-completions",
       "models": [
@@ -271,7 +271,7 @@ Inside opencode, `/model` will list the models. `cost` is zero because it's your
 Point it at an `anthropic`-type backend through the proxy:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://llm-proxy:4000
+export ANTHROPIC_BASE_URL=http://hikyaku:4000
 export ANTHROPIC_AUTH_TOKEN=$PROXY_API_KEY
 claude
 ```
@@ -280,7 +280,7 @@ Use `/model` inside Claude Code to pick a virtual model whose route points to yo
 
 #### Any OpenAI-compatible client
 
-- Base URL: `http://llm-proxy:4000/v1`
+- Base URL: `http://hikyaku:4000/v1`
 - API key: your `server.api_key`
 
 The client sees virtual models via `/v1/models`. If anything odd happens, `LOG_LEVEL=1` + `[req]` line will show you the model name as received — 90% of client-integration issues diagnose from that one line.
@@ -299,9 +299,9 @@ sig_message_capture:
 `SIGHUP` to pick up the config, then when you want to dump:
 
 ```bash
-docker kill --signal=USR1 llm-proxy
+docker kill --signal=USR1 hikyaku
 # ...make up to 5 requests...
-docker cp llm-proxy:/capture/. ./local-captures/
+docker cp hikyaku:/capture/. ./local-captures/
 jq . ./local-captures/*.json
 ```
 
@@ -309,7 +309,7 @@ The container-local path is ephemeral — files live in the container's writable
 
 ## Security
 
-llm-proxy is built for personal/small-team use behind a trusted boundary — Tailscale, VPN, or a private subnet. A few things are worth knowing:
+hikyaku is built for personal/small-team use behind a trusted boundary — Tailscale, VPN, or a private subnet. A few things are worth knowing:
 
 **Transport is secure by default.** The proxy refuses to start without TLS unless `server.allow_plaintext: true` is explicitly set. Configure `server.tls.cert` + `server.tls.key` for HTTPS, or set the plaintext opt-in if you're behind Tailscale/VPN and accepting the link-layer encryption as your boundary. Outbound to providers is always HTTPS when the `base_url` says so, verified against the system CA bundle.
 
@@ -328,7 +328,7 @@ llm-proxy is built for personal/small-team use behind a trusted boundary — Tai
 ```bash
 make build-hardened
 # or:
-go build -tags hardened -o llm-proxy ./cmd/llm-proxy
+go build -tags hardened -o hikyaku ./cmd/hikyaku
 ```
 
 The hardened tag **compiles out** (not just disables) SIGUSR1 capture, log levels 3-4, and the prompt text in journal entries. Structural telemetry — counts, structural signals, routing params — is kept. Every build prints a banner at startup identifying which mode it's running in, so operators can verify via `docker logs` without re-reading config. Details in [docs/security.md](docs/security.md).

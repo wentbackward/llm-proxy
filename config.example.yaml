@@ -41,9 +41,9 @@ journal:
 # Headers like Authorization are redacted in the capture.
 sig_message_capture:
   enabled: false
-  output_folder: ""     # e.g. /var/log/llm-proxy/capture — REQUIRED when enabled
+  output_folder: ""     # e.g. /var/log/hikyaku/capture — REQUIRED when enabled
   max_messages: 5       # capture window size; re-armed on each SIGUSR1
-  # Usage: docker kill --signal=USR1 llm-proxy
+  # Usage: docker kill --signal=USR1 hikyaku
   #   → captures next max_messages requests, then auto-closes the window
 
 # Upstream LLM providers

@@ -1,6 +1,6 @@
 # Security
 
-llm-proxy is designed for personal or small-team use, typically behind a trusted network boundary (Tailscale, VPN, or a private subnet). This document covers the explicit trade-offs, the features that can expose prompt content, and how to strip those features at compile time for deployments that demand it.
+hikyaku is designed for personal or small-team use, typically behind a trusted network boundary (Tailscale, VPN, or a private subnet). This document covers the explicit trade-offs, the features that can expose prompt content, and how to strip those features at compile time for deployments that demand it.
 
 ## Threat model
 
@@ -86,10 +86,10 @@ For deployments where any of the above features are a concern, build with `-tags
 
 ```bash
 make build-hardened
-# produces bin/llm-proxy-hardened
+# produces bin/hikyaku-hardened
 
 # or directly:
-go build -tags hardened -o llm-proxy ./cmd/llm-proxy
+go build -tags hardened -o hikyaku ./cmd/hikyaku
 ```
 
 The hardened tag **compiles out** (not just disables) the following:
@@ -111,20 +111,20 @@ Everything else is identical: routing, metrics, parameter merge, streaming, back
 Every build prints a startup banner identifying which mode it's running in:
 
 ```
-[llm-proxy] hardened build (SIGUSR1 capture, log levels 3-4, and journal prompt text are stripped)
+[hikyaku] hardened build (SIGUSR1 capture, log levels 3-4, and journal prompt text are stripped)
 ```
 
 or, for the default debug build:
 
 ```
 ===============================================================================
-  llm-proxy DEBUG BUILD — includes features that can expose prompt contents:
+  hikyaku DEBUG BUILD — includes features that can expose prompt contents:
     * SIGUSR1 writes full request/response bodies to disk (when enabled)
     * LOG_LEVEL=3 logs 80 bytes of request bodies
     * LOG_LEVEL=4 logs full request and response message text
     * The request journal records up to 2KB of system + 8KB of last user text
 
-  For production use, build with:  go build -tags hardened ./cmd/llm-proxy
+  For production use, build with:  go build -tags hardened ./cmd/hikyaku
   See docs/security.md for details.
 ===============================================================================
 ```

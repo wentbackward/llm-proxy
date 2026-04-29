@@ -1,4 +1,4 @@
-module github.com/wentbackward/llm-proxy
+module github.com/wentbackward/hikyaku
 
 go 1.25.0
 

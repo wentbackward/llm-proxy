@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/wentbackward/llm-proxy/internal/proxy"
+	"github.com/wentbackward/hikyaku/internal/proxy"
 )
 
 // BuildMode identifies this binary to operators at startup.
@@ -21,9 +21,9 @@ func logStartupBanner() {
 | |)| _|  \ /   | _ \ |_| || || |__| |) |
 |___/|___| \/   |___/\___/|___|____|___/
 
-  llm-proxy %s — HARDENED`, Version)
+  hikyaku %s — HARDENED`, Version)
 	} else {
-		log.Printf("[llm-proxy] %s — HARDENED", Version)
+		log.Printf("[hikyaku] %s — HARDENED", Version)
 	}
 }
 

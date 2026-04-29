@@ -5,7 +5,7 @@ Short reference for agents working in this repo. For full docs see `docs/`.
 ## Build and test
 
 ```
-make build     # go build -o bin/llm-proxy ./cmd/llm-proxy
+make build     # go build -o bin/hikyaku ./cmd/hikyaku
 make test      # go test ./... -race -count=1
 make lint      # golangci-lint run ./...
 make check     # lint + test + build, everything CI runs
@@ -19,7 +19,7 @@ The linter config is tuned for this repo (`.golangci.yml`, v2 schema). Do NOT re
 
 **Pushing to `main` does not release anything.** CI (`ci.yml`) runs tests only.
 
-The Docker image at `ghcr.io/wentbackward/llm-proxy:latest` and the GitHub release only update when a `v*` tag is pushed — that triggers `release.yml`.
+The Docker image at `ghcr.io/wentbackward/hikyaku:latest` and the GitHub release only update when a `v*` tag is pushed — that triggers `release.yml`.
 
 After a feature or fix lands on `main`, if the user wants it in prod, you need to tag a release:
 
@@ -39,7 +39,7 @@ Two build variants gated by the `hardened` Go build tag:
 - **Default (`make build`)**: all features, including SIGUSR1 message capture, log levels 3-4, and the prompt text fields in journal entries.
 - **Hardened (`make build-hardened`, `go build -tags hardened`)**: above three features are compiled out — not runtime-disabled, removed from the binary. Structural telemetry stays.
 
-When adding new code that touches any of those three feature areas, split across build-tag files using the existing pattern (see `internal/capture/new_debug.go` + `new_hardened.go`, `internal/logger/level_*.go`, `internal/journal/text_*.go`, `cmd/llm-proxy/buildmode_*.go`). The `hardened` file always has the stripped/no-op implementation. Run `make check-hardened` to verify the hardened variant still builds and lints cleanly.
+When adding new code that touches any of those three feature areas, split across build-tag files using the existing pattern (see `internal/capture/new_debug.go` + `new_hardened.go`, `internal/logger/level_*.go`, `internal/journal/text_*.go`, `cmd/hikyaku/buildmode_*.go`). The `hardened` file always has the stripped/no-op implementation. Run `make check-hardened` to verify the hardened variant still builds and lints cleanly.
 
 ## Protocol rule
 

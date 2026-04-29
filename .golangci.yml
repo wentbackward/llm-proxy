@@ -1,4 +1,4 @@
-# golangci-lint configuration for llm-proxy
+# golangci-lint configuration for hikyaku
 # Tuned for golangci-lint v2.x.
 version: "2"
 
@@ -49,7 +49,7 @@ linters:
             - $all
           allow:
             - $gostd
-            - github.com/wentbackward/llm-proxy
+            - github.com/wentbackward/hikyaku
             - gopkg.in/yaml.v3
             - go.opentelemetry.io
             - github.com/prometheus/client_golang
@@ -184,7 +184,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/wentbackward/llm-proxy
+        - github.com/wentbackward/hikyaku
 
 issues:
   max-issues-per-linter: 0

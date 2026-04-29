@@ -41,7 +41,7 @@ func New(otlpEndpoint string) (*Journal, error) {
 	}
 
 	provider := sdklog.NewLoggerProvider(opts...)
-	logger := provider.Logger("llm-proxy-journal")
+	logger := provider.Logger("hikyaku-journal")
 
 	return &Journal{
 		logger:   logger,

@@ -9,7 +9,7 @@
 
 ```bash
 go mod tidy
-make build        # produces bin/llm-proxy
+make build        # produces bin/hikyaku
 make test         # runs all tests with race detector
 make run          # runs against config.example.yaml
 ```
@@ -17,7 +17,7 @@ make run          # runs against config.example.yaml
 ## Project structure
 
 ```
-cmd/llm-proxy/          main.go — startup, signal handling, probes
+cmd/hikyaku/          main.go — startup, signal handling, probes
 internal/
   config/               YAML config loader, validation, env expansion
   proxy/                HTTP handlers (/v1/chat/completions, /v1/completions, /v1/messages), reverse proxy, SSE parser, idle timeout
@@ -58,7 +58,7 @@ Bypass with `git commit --no-verify` if you need to (don't make a habit of it �
 ## Docker
 
 ```bash
-make docker-build     # docker build -t llm-proxy .
+make docker-build     # docker build -t hikyaku .
 ```
 
 The Dockerfile uses a two-stage build: Go builder on `golang:1.25-alpine`, then copies the static binary to `scratch`. Final image is ~7 MB.
@@ -67,7 +67,7 @@ Multi-arch images (linux/amd64, linux/arm64) are built automatically by the rele
 
 ## SIGHUP reload — what applies, what doesn't
 
-`docker kill --signal=HUP llm-proxy` re-reads `config.yaml` and atomically swaps in the new state. Good for iterating on routes and backends without disturbing in-flight requests. But several pieces are initialised once at startup and do **not** reload:
+`docker kill --signal=HUP hikyaku` re-reads `config.yaml` and atomically swaps in the new state. Good for iterating on routes and backends without disturbing in-flight requests. But several pieces are initialised once at startup and do **not** reload:
 
 | Config change | Reloads via SIGHUP? |
 |---|---|
@@ -81,11 +81,11 @@ Multi-arch images (linux/amd64, linux/arm64) are built automatically by the rele
 | `telemetry.prometheus.*` (host, port, path, TLS, allow_plaintext) | ❌ Restart |
 | `journal.enabled` / `journal.otlp_endpoint` | ❌ Restart |
 
-When in doubt, check `docker logs llm-proxy 2>&1 | grep -A20 "SIGHUP received"` — the `[reload]` block prints the full route table the proxy now knows about. If your change doesn't appear there, the container didn't see it (most common cause: file-level bind mount + atomic-save editor; see the Quick start in the README).
+When in doubt, check `docker logs hikyaku 2>&1 | grep -A20 "SIGHUP received"` — the `[reload]` block prints the full route table the proxy now knows about. If your change doesn't appear there, the container didn't see it (most common cause: file-level bind mount + atomic-save editor; see the Quick start in the README).
 
 ## Release process
 
-**Pushes to `main` do not ship a release.** CI (`ci.yml`) runs tests on every push but does not build binaries or publish Docker images. The Docker image at `ghcr.io/wentbackward/llm-proxy:latest` only updates when a version tag is pushed.
+**Pushes to `main` do not ship a release.** CI (`ci.yml`) runs tests on every push but does not build binaries or publish Docker images. The Docker image at `ghcr.io/wentbackward/hikyaku:latest` only updates when a version tag is pushed.
 
 Anything merged to `main` without a tag is invisible to prod until you tag.
 
@@ -95,7 +95,7 @@ Anything merged to `main` without a tag is invisible to prod until you tag.
    git tag v0.x.y
    git push origin v0.x.y
    ```
-3. The release workflow (`release.yml`, triggered only by `v*` tag pushes) runs tests, builds binaries (linux/darwin/windows × amd64/arm64), creates a GitHub release with auto-generated notes, and publishes the multi-arch Docker image to `ghcr.io/wentbackward/llm-proxy` with tags `:latest`, `:{major}`, `:{major}.{minor}`, and `:{full}`.
+3. The release workflow (`release.yml`, triggered only by `v*` tag pushes) runs tests, builds binaries (linux/darwin/windows × amd64/arm64), creates a GitHub release with auto-generated notes, and publishes the multi-arch Docker image to `ghcr.io/wentbackward/hikyaku` with tags `:latest`, `:{major}`, `:{major}.{minor}`, and `:{full}`.
 4. Typical runtime: ~8 minutes end to end.
 5. On prod: `docker compose pull && docker compose up -d --force-recreate`.
 

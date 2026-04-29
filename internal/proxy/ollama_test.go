@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wentbackward/llm-proxy/internal/config"
-	"github.com/wentbackward/llm-proxy/internal/telemetry"
+	"github.com/wentbackward/hikyaku/internal/config"
+	"github.com/wentbackward/hikyaku/internal/telemetry"
 )
 
 // newOllamaTestServer spins up a fake Ollama backend that records the path
