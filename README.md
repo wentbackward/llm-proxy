@@ -128,7 +128,7 @@ If a client breaks, set `LOG_LEVEL=1` and read the `[req]` line — it shows the
 
 Three layers decide where a request goes, in order:
 
-1. **Explicit route** — a route with `virtual_model: X` and either `backend: Y` or `auto_route:`. Checked first.
+1. **Explicit route** — a route with `virtual_model: X` and either `backend: Y`, `backend_group: G`, or `auto_route:`. Checked first.
 2. **`auto_route`** — a virtual model whose body is inspected to pick between two sub-routes:
    ```yaml
    - virtual_model: smart
@@ -139,6 +139,10 @@ Three layers decide where a request goes, in order:
 3. **`passthrough_unrouted`** — when `true`, unknown model names are forwarded as-is to the default backend (see below). When `false` (default), they return 404 with the list of available virtual models.
 
 The **default backend** is the one marked `default: true` in its config, or the first backend in the list if none is marked. It is the target for `passthrough_unrouted` requests.
+
+### Load balancing
+
+Instead of pinning a route to a single backend, use `backend_group:` to spread traffic across a named group. The proxy supports four strategies — `sticky_least_loaded` (pins sessions for KV-cache locality), `least_loaded`, `round_robin`, and `single`. See [Configuration → Load Balancing](docs/configuration.md#load-balancing) for the full reference.
 
 ### Parameter profiles — defaults, caller, clamp
 
