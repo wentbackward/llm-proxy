@@ -13,9 +13,9 @@ import (
 )
 
 // BuildMode identifies this binary to operators at startup and in docs.
-const BuildMode = "debug"
+const BuildMode = "inspect"
 
-// logStartupBanner prints a visible banner listing the debug-only features
+// logStartupBanner prints a visible banner listing the inspect-mode features
 // that are compiled into this binary. Intended to be grep-able in container
 // logs so operators can't miss that this build includes prompt-bearing
 // capabilities. Build with `-tags hardened` to strip them.
@@ -25,7 +25,7 @@ func logStartupBanner() {
 | |)| _|  \ /   | _ \ |_| || || |__| |) |
 |___/|___| \/   |___/\___/|___|____|___/
 
-  llm-proxy %s — DEBUG BUILD — includes features that can expose prompt contents:
+  llm-proxy %s — INSPECT MODE — includes features that can expose prompt contents:
     * SIGUSR1 writes full request/response bodies to disk (when enabled)
     * LOG_LEVEL=3 logs 80 bytes of request bodies
     * LOG_LEVEL=4 logs full request and response message text

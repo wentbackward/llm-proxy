@@ -55,7 +55,7 @@ routes:
 		t.Fatalf("config load: %v", err)
 	}
 	metrics, _, _ := telemetry.Init()
-	srv = New("test", cfg, metrics, nil)
+	srv = New("test", "inspect", cfg, metrics, nil)
 	return srv, backend
 }
 

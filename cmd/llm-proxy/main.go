@@ -62,7 +62,7 @@ func main() {
 
 	// ── Proxy server ───────────────────────────────────────────────────────
 	proxyMux := http.NewServeMux()
-	srv := proxy.New(Version, cfg, metrics, j)
+	srv := proxy.New(Version, BuildMode, cfg, metrics, j)
 	srv.RegisterRoutes(proxyMux)
 
 	proxyAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

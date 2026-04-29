@@ -39,25 +39,27 @@ func requestID() string {
 
 // Server handles all proxy traffic.
 type Server struct {
-	version  string
-	cfg      atomic.Pointer[config.Config]
-	rtr      atomic.Pointer[router.Router]
-	metrics  *telemetry.Metrics
-	journal  *journal.Journal                // nil if journal disabled
-	capture  atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
-	balancer *balancer.Balancer              // nil if no groups configured
+	buildMode string
+	version   string
+	cfg       atomic.Pointer[config.Config]
+	rtr       atomic.Pointer[router.Router]
+	metrics   *telemetry.Metrics
+	journal   *journal.Journal                // nil if journal disabled
+	capture   atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
+	balancer  *balancer.Balancer              // nil if no groups configured
 
 	transport  *http.Transport          // shared connection pool for all backends
 	mu         sync.RWMutex             // guards semaphores
 	semaphores map[string]chan struct{} // per-backend concurrency limiter (nil entry = unlimited)
 }
 
-func New(version string, cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
+func New(version, buildMode string, cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
 	tc := cfg.Server.Transport
 	s := &Server{
-		version: version,
-		metrics: metrics,
-		journal: j,
+		version:   version,
+		buildMode: buildMode,
+		metrics:   metrics,
+		journal:   j,
 		transport: &http.Transport{
 			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 			MaxIdleConns:        tc.MaxIdleConns,
@@ -204,7 +206,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, s.version)
+		_, _ = fmt.Fprintf(w, `{"status":"ok","version":"%s","build_mode":"%s"}`, s.version, s.buildMode)
 	})
 	mux.HandleFunc("/v1/models", auth(s.handleModels))
 	mux.HandleFunc("/v1/chat/completions", auth(s.handleProxy))
