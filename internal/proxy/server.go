@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/wentbackward/llm-proxy/internal/balancer"
 	"github.com/wentbackward/llm-proxy/internal/capture"
 	"github.com/wentbackward/llm-proxy/internal/config"
 	"github.com/wentbackward/llm-proxy/internal/journal"
@@ -38,11 +39,12 @@ func requestID() string {
 
 // Server handles all proxy traffic.
 type Server struct {
-	cfg     atomic.Pointer[config.Config]
-	rtr     atomic.Pointer[router.Router]
-	metrics *telemetry.Metrics
-	journal *journal.Journal                // nil if journal disabled
-	capture atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
+	cfg      atomic.Pointer[config.Config]
+	rtr      atomic.Pointer[router.Router]
+	metrics  *telemetry.Metrics
+	journal  *journal.Journal                // nil if journal disabled
+	capture  atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
+	balancer *balancer.Balancer              // nil if no groups configured
 
 	transport  *http.Transport          // shared connection pool for all backends
 	mu         sync.RWMutex             // guards semaphores
@@ -67,6 +69,9 @@ func New(cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Se
 	s.rtr.Store(router.New(cfg))
 	s.buildSemaphores(cfg)
 	s.applyCaptureConfig(cfg)
+	if len(cfg.Groups) > 0 {
+		s.balancer = balancer.New(cfg)
+	}
 	return s
 }
 
@@ -103,6 +108,20 @@ func (s *Server) Reload(cfg *config.Config) {
 	s.cfg.Store(cfg)
 	s.buildSemaphores(cfg)
 	s.applyCaptureConfig(cfg)
+
+	// Swap balancer on reload
+	if s.balancer != nil {
+		old := s.balancer
+		if len(cfg.Groups) > 0 {
+			s.balancer = balancer.New(cfg)
+		} else {
+			s.balancer = nil
+		}
+		old.Stop()
+	} else if len(cfg.Groups) > 0 {
+		s.balancer = balancer.New(cfg)
+	}
+
 	log.Printf("[reload] %d backends, %d routes", len(cfg.Backends), len(cfg.Routes))
 	for i := range cfg.Backends {
 		b := &cfg.Backends[i]
@@ -324,6 +343,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	// ── Resolve model → backend ────────────────────────────────────────────
 	modelName, _ := body["model"].(string)
+	isStreaming, _ := body["stream"].(bool)
 
 	var backend *config.Backend
 	var realModel string
@@ -366,8 +386,41 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 		log.Printf("[proxy] no route for %q, passing through to %s (from=%s ua=%s)",
 			modelName, b.ID, r.RemoteAddr, r.UserAgent())
 	} else {
-		backend = res.Backend
 		realModel = res.RealModel
+
+		// LB group: select backend at runtime
+		if res.Group != "" && s.balancer != nil {
+			// Compute affinity key
+			var affKey string
+			grpCfg := cfg.Groups[res.Group]
+			switch grpCfg.Affinity.Key {
+			case "none":
+				// no affinity
+			case "canonical_prefix":
+				affKey = balancer.AffinityKey(body, grpCfg.Affinity.PrefixBytes)
+			default:
+				// header:NAME
+				headerName := strings.TrimPrefix(grpCfg.Affinity.Key, "header:")
+				affKey = balancer.HeaderAffinityKey(r.Header, headerName)
+			}
+
+			selected, selErr := s.balancer.Select(res.Group, affKey, &balancer.RequestContext{
+				AffinityKey:   affKey,
+				IsStreaming:   isStreaming,
+				EstimatedSize: estimateTokens(body),
+			})
+			if selErr != nil {
+				jsonError(w, "no healthy backend available", http.StatusServiceUnavailable)
+				return
+			}
+			if bk, ok := cfg.Backend(selected.ID); ok {
+				backend = bk
+			}
+			s.balancer.Incr(selected.ID)
+		} else {
+			backend = res.Backend
+		}
+
 		// Apply merged sampling params back to the body
 		for k, v := range res.Params {
 			body[k] = v
@@ -382,7 +435,6 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	}
 
 	body["model"] = realModel
-	isStreaming, _ := body["stream"].(bool)
 
 	// ── L2: log transformation summary ─────────────────────────────────────
 	authType := "none"
@@ -508,6 +560,9 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			elapsed := time.Since(t0).Seconds()
 			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
+			if s.balancer != nil {
+				s.balancer.Decr(backendID)
+			}
 			upstreamURL := targetURL.String() + r.URL.Path
 			logger.Request("[%s] %s %s model=%s backend=%s url=%s status=502 dur=%.3fs ERROR: %v",
 				rid, r.Method, r.URL.Path, modelName, backendID, upstreamURL, elapsed, err)
@@ -806,6 +861,9 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
 					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
+					if s.balancer != nil {
+						s.balancer.Decr(backendID)
+					}
 					logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true",
 						rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
 					if ssep != nil && ssep.captureContent {
@@ -834,6 +892,9 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
 			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
+			if s.balancer != nil {
+				s.balancer.Decr(backendID)
+			}
 			logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs",
 				rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
 
@@ -1149,6 +1210,35 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		pathOverride: "/embeddings",
 		protocol:     "openai",
 	})
+}
+
+// estimateTokens returns a rough token count from the request body.
+// Uses char count / 4 as the heuristic (consistent with journal.Analyze).
+func estimateTokens(body map[string]interface{}) int {
+	messages, _ := body["messages"].([]interface{})
+	var total int
+	for _, m := range messages {
+		msg, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch content := msg["content"].(type) {
+		case string:
+			total += len(content)
+		case []interface{}:
+			for _, p := range content {
+				part, ok := p.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if part["type"] == "text" {
+					text, _ := part["text"].(string)
+					total += len(text)
+				}
+			}
+		}
+	}
+	return total / 4
 }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
