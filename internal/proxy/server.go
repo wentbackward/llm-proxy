@@ -310,6 +310,12 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	}
 	logger.Body("[%s] %s %s body: %s", rid, r.Method, r.URL.Path, string(preview))
 
+	// ── Sanitize messages: normalize null content to empty string ──────────
+	// Some clients (OpenClaw) send assistant messages with content: null when
+	// the assistant makes tool_calls but produces no text. Most vendors accept
+	// this, but some (Together AI) reject it. Normalize to empty string.
+	sanitizeMessages(rid, body)
+
 	// ── Detect protocol ────────────────────────────────────────────────────
 	protocol := opts.protocol
 	if protocol == "" {
@@ -1025,6 +1031,33 @@ func deepMergeInto(dst, src map[string]interface{}) {
 		}
 		dst[k] = v
 	}
+}
+
+// sanitizeMessages normalizes null content to empty string in the messages array.
+// Some clients send assistant messages with content: null when the assistant
+// makes tool_calls but produces no text. Most vendors accept this, but some
+// (Together AI) reject it. Normalize to empty string.
+func sanitizeMessages(rid string, body map[string]interface{}) {
+	msgs, ok := body["messages"].([]interface{})
+	if !ok {
+		return
+	}
+	var sanitized []int
+	for i := range msgs {
+		m, ok := msgs[i].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if m["content"] == nil {
+			m["content"] = ""
+			sanitized = append(sanitized, i)
+		}
+	}
+	if len(sanitized) == 0 {
+		return
+	}
+	logger.Request("[%s] normalized %d message(s) with null content to empty string", rid, len(sanitized))
+	logger.Headers("[%s]   affected indices: %v", rid, sanitized)
 }
 
 func detectProtocol(r *http.Request) string {

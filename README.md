@@ -138,7 +138,7 @@ Three layers decide where a request goes, in order:
    ```
 3. **`passthrough_unrouted`** — when `true`, unknown model names are forwarded as-is to the default backend (see below). When `false` (default), they return 404 with the list of available virtual models.
 
-The **default backend** is the one marked `default: true` in its config, or the first backend in the list if none is marked. It's also the source for `/v1/models` — the proxy pulls real context lengths from it and rewrites the response to show your virtual model names.
+The **default backend** is the one marked `default: true` in its config, or the first backend in the list if none is marked. It is the target for `passthrough_unrouted` requests.
 
 ### Parameter profiles — defaults, caller, clamp
 

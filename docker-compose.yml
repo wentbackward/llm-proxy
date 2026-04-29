@@ -20,6 +20,8 @@ services:
       - ./config:/config:ro
       # Mount Tailscale certs for TLS (run: tailscale cert <hostname>)
       # - /var/lib/tailscale/certs:/certs:ro
+    env_file:
+      - .env
     environment:
       CONFIG_PATH: /config/config.yaml
       # Secrets — set these in a .env file or your secrets manager

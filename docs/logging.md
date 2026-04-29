@@ -13,7 +13,7 @@ At startup the proxy probes every configured backend, logs whether it is reachab
 [probe] backend hf-serverless UNREACHABLE: dial tcp ...: connection refused
 ```
 
-Cloud APIs (Anthropic, OpenAI, HuggingFace) don't expose `/v1/models` — set `skip_probe: true` on those backends to suppress the 404 noise.
+Cloud APIs (Anthropic, OpenAI, HuggingFace) don't expose `/models` — set `skip_probe: true` on those backends to suppress the 404 noise.
 
 Probe output is always printed regardless of log level.
 

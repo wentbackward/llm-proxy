@@ -77,13 +77,13 @@ backends:
 ```
 
 - **`type`** — `openai`, `anthropic`, or `ollama`. Determines auth header format, stream parsing, and `enable_thinking` translation. Must match the protocol the client speaks: OpenAI format (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) routes to `openai` backends; Anthropic format (`/v1/messages`) routes to `anthropic` backends; Ollama-native format (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) routes to `ollama` backends.
-- **`base_url`** — scheme + host. Trailing `/v1` is stripped automatically at load time.
+- **`base_url`** — the full base URL including any version or path segments (e.g. `https://api.openai.com/v1`, `https://api.novita.ai/openai/v1`, `http://gpu-server:8000`). Taken verbatim — the proxy does not strip or append path components.
 - **`api_key`** — static key or OAuth token. Sent to the backend using the auth header format determined by `auth_type`. If empty, the client's original auth headers pass through to the backend.
 - **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
 - **`timeout_seconds`** — idle timeout per request. If no bytes flow for this duration, the request is cancelled. Default: 300.
 - **`max_concurrency`** — maximum number of in-flight requests to this backend. When the limit is reached, new requests queue until a slot opens or the client disconnects. `0` (default) means unlimited.
-- **`skip_probe`** — skip the startup `/v1/models` health check. Set `true` for cloud APIs.
-- **`default`** — marks this backend as the fallback target for `passthrough_unrouted` requests and the source for `/v1/models` responses. At most one backend may set `default: true`; config fails to load if multiple do. If no backend is marked default, the first one in the list is used and a warning is logged at startup when `passthrough_unrouted: true`.
+- **`skip_probe`** — skip the startup `/models` health check. Set `true` for cloud APIs.
+- **`default`** — marks this backend as the fallback target for `passthrough_unrouted` requests.
 - **`ports`** — expand a single backend definition into one backend per port. Use `{port}` as a placeholder in `id` and `base_url`. Accepts a single integer, a YAML list, or a `"lo-hi"` range string (inclusive). All other fields are copied to each expanded backend.
 
 ```yaml
@@ -391,7 +391,7 @@ The proxy serves the following endpoints, all using the same reverse-proxy pipel
 | `/v1/completions` | OpenAI | `openai`-type backends (code completion / FIM) |
 | `/v1/embeddings` | OpenAI | `openai`-type backends (embedding models) |
 | `/v1/messages` | Anthropic | `anthropic`-type backends |
-| `/v1/models` | OpenAI | Lists virtual models (rewrites upstream response) |
+| `/v1/models` | OpenAI | Lists virtual models from routes |
 | `/health` | — | Health check (unauthenticated) |
 
 Each endpoint forwards requests in the client's format — no protocol translation. A request to `/v1/chat/completions` must route to an `openai`-type backend; `/v1/messages` must route to an `anthropic`-type backend.
