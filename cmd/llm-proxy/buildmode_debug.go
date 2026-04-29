@@ -3,10 +3,10 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/wentbackward/llm-proxy/internal/proxy"
@@ -15,25 +15,20 @@ import (
 // BuildMode identifies this binary to operators at startup and in docs.
 const BuildMode = "inspect"
 
-// logStartupBanner prints a visible banner listing the inspect-mode features
-// that are compiled into this binary. Intended to be grep-able in container
-// logs so operators can't miss that this build includes prompt-bearing
-// capabilities. Build with `-tags hardened` to strip them.
+// logStartupBanner prints a visible banner. In dev builds it shows the ASCII
+// logo; in release builds it prints a single line. Both modes always indicate
+// whether this is an inspect or hardened build.
 func logStartupBanner() {
-	banner := fmt.Sprintf(` ____  _____   __  ___ _   _ ___ _    ___
+	if strings.Contains(Version, "-") {
+		log.Printf(` ____  _____   __  ___ _   _ ___ _    ___
 |   \| __\ \/ /  | _ ) | | |_ _| |  |   \
 | |)| _|  \ /   | _ \ |_| || || |__| |) |
 |___/|___| \/   |___/\___/|___|____|___/
 
-  llm-proxy %s — INSPECT MODE — includes features that can expose prompt contents:
-    * SIGUSR1 writes full request/response bodies to disk (when enabled)
-    * LOG_LEVEL=3 logs 80 bytes of request bodies
-    * LOG_LEVEL=4 logs full request and response message text
-    * The request journal records up to 2KB of system + 8KB of last user text
-
-  For production use, build with:  go build -tags hardened ./cmd/llm-proxy
-  See docs/security.md for details.`, Version)
-	log.Print(banner)
+  llm-proxy %s — INSPECT`, Version)
+	} else {
+		log.Printf("[llm-proxy] %s — INSPECT", Version)
+	}
 }
 
 // installCaptureSignal wires SIGUSR1 to the capture feature.

@@ -4,6 +4,7 @@ package main
 
 import (
 	"log"
+	"strings"
 
 	"github.com/wentbackward/llm-proxy/internal/proxy"
 )
@@ -11,11 +12,19 @@ import (
 // BuildMode identifies this binary to operators at startup.
 const BuildMode = "hardened"
 
-// logStartupBanner prints a one-line confirmation that debug features have
-// been compiled out. Kept short because there's nothing to warn about —
-// this is the "nothing to see here" build.
+// logStartupBanner prints a visible banner. In dev builds it shows the ASCII
+// logo; in release builds it prints a single line.
 func logStartupBanner() {
-	log.Printf("[llm-proxy] %s — hardened build (SIGUSR1 capture, log levels 3-4, and journal prompt text are stripped)", Version)
+	if strings.Contains(Version, "-") {
+		log.Printf(` ____  _____   __  ___ _   _ ___ _    ___
+|   \| __\ \/ /  | _ ) | | |_ _| |  |   \
+| |)| _|  \ /   | _ \ |_| || || |__| |) |
+|___/|___| \/   |___/\___/|___|____|___/
+
+  llm-proxy %s — HARDENED`, Version)
+	} else {
+		log.Printf("[llm-proxy] %s — HARDENED", Version)
+	}
 }
 
 // installCaptureSignal is a no-op in hardened builds.
