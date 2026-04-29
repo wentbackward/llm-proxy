@@ -1,12 +1,15 @@
 .PHONY: build build-hardened test test-short lint lint-hardened vet check check-hardened run docker-build install-hooks
 
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo dev)
+LDFLAGS = -ldflags '-X main.Version=$(VERSION)'
+
 build:
-	go build -o bin/llm-proxy ./cmd/llm-proxy
+	go build $(LDFLAGS) -o bin/llm-proxy ./cmd/llm-proxy
 
 # Hardened build strips the SIGUSR1 capture feature, log levels 3-4, and
 # the prompt text from journal entries. See docs/security.md.
 build-hardened:
-	go build -tags hardened -o bin/llm-proxy-hardened ./cmd/llm-proxy
+	go build -tags hardened $(LDFLAGS) -o bin/llm-proxy-hardened ./cmd/llm-proxy
 
 test:
 	go test ./... -v -race -count=1

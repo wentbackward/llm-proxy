@@ -19,6 +19,9 @@ import (
 	"github.com/wentbackward/llm-proxy/internal/telemetry"
 )
 
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
 func main() {
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
@@ -59,7 +62,7 @@ func main() {
 
 	// ── Proxy server ───────────────────────────────────────────────────────
 	proxyMux := http.NewServeMux()
-	srv := proxy.New(cfg, metrics, j)
+	srv := proxy.New(Version, cfg, metrics, j)
 	srv.RegisterRoutes(proxyMux)
 
 	proxyAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

@@ -15,7 +15,7 @@ const BuildMode = "hardened"
 // been compiled out. Kept short because there's nothing to warn about —
 // this is the "nothing to see here" build.
 func logStartupBanner() {
-	log.Print("[llm-proxy] hardened build (SIGUSR1 capture, log levels 3-4, and journal prompt text are stripped)")
+	log.Printf("[llm-proxy] %s — hardened build (SIGUSR1 capture, log levels 3-4, and journal prompt text are stripped)", Version)
 }
 
 // installCaptureSignal is a no-op in hardened builds.

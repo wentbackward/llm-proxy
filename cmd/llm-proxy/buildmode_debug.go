@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -19,9 +20,9 @@ const BuildMode = "debug"
 // logs so operators can't miss that this build includes prompt-bearing
 // capabilities. Build with `-tags hardened` to strip them.
 func logStartupBanner() {
-	banner := `
+	banner := fmt.Sprintf(`
 ===============================================================================
-  llm-proxy DEBUG BUILD — includes features that can expose prompt contents:
+  llm-proxy %s — DEBUG BUILD — includes features that can expose prompt contents:
     * SIGUSR1 writes full request/response bodies to disk (when enabled)
     * LOG_LEVEL=3 logs 80 bytes of request bodies
     * LOG_LEVEL=4 logs full request and response message text
@@ -29,7 +30,7 @@ func logStartupBanner() {
 
   For production use, build with:  go build -tags hardened ./cmd/llm-proxy
   See docs/security.md for details.
-===============================================================================`
+===============================================================================`, Version)
 	log.Print(banner)
 }
 

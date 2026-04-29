@@ -39,6 +39,7 @@ func requestID() string {
 
 // Server handles all proxy traffic.
 type Server struct {
+	version  string
 	cfg      atomic.Pointer[config.Config]
 	rtr      atomic.Pointer[router.Router]
 	metrics  *telemetry.Metrics
@@ -51,9 +52,10 @@ type Server struct {
 	semaphores map[string]chan struct{} // per-backend concurrency limiter (nil entry = unlimited)
 }
 
-func New(cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
+func New(version string, cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
 	tc := cfg.Server.Transport
 	s := &Server{
+		version: version,
 		metrics: metrics,
 		journal: j,
 		transport: &http.Transport{
@@ -202,7 +204,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_, _ = fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, s.version)
 	})
 	mux.HandleFunc("/v1/models", auth(s.handleModels))
 	mux.HandleFunc("/v1/chat/completions", auth(s.handleProxy))

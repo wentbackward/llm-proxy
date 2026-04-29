@@ -123,7 +123,7 @@ func newTestServer(t *testing.T, capture *capturedRequest) (srv *Server, backend
 	}
 
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	return s, backend
 }
@@ -406,7 +406,7 @@ func TestCompletions_BackendError(t *testing.T) {
 		},
 	}
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":  "test-model",
@@ -435,7 +435,7 @@ func TestCompletions_BackendUnreachable(t *testing.T) {
 		},
 	}
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":  "test-model",
@@ -574,7 +574,7 @@ func TestSemaphore_LimitsConcurrency(t *testing.T) {
 		},
 	}
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	makeReq := func() (*httptest.ResponseRecorder, *http.Request) {
 		body, _ := json.Marshal(map[string]interface{}{"model": "test-model", "prompt": "test"})
@@ -653,7 +653,7 @@ func TestSemaphore_ReloadUpdatesSemaphores(t *testing.T) {
 		},
 	}
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg1, metrics, nil)
+	s := New("test", cfg1, metrics, nil)
 
 	s.mu.RLock()
 	sem := s.semaphores["b1"]
@@ -711,7 +711,7 @@ routes:
 		t.Fatal(err)
 	}
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg1, metrics, nil)
+	s := New("test", cfg1, metrics, nil)
 
 	// model-a should work
 	sendChat(t, s, "model-a", http.StatusOK)
@@ -863,7 +863,7 @@ routes:
 	}
 
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":    "nonexistent",
@@ -925,7 +925,7 @@ routes:
 	}
 
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":    "raw-upstream-model",

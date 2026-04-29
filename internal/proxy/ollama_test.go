@@ -71,7 +71,7 @@ routes:
 		t.Fatalf("load config: %v", err)
 	}
 	metrics, _, _ := telemetry.Init()
-	srv = New(cfg, metrics, nil)
+	srv = New("test", cfg, metrics, nil)
 	return srv, backend
 }
 
@@ -179,7 +179,7 @@ func TestOllama_TagsWithNoOllamaBackendReturns503(t *testing.T) {
 		},
 	}
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	req := httptest.NewRequest("GET", "/api/tags", http.NoBody)
 	rec := httptest.NewRecorder()

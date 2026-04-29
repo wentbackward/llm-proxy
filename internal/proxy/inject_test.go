@@ -58,7 +58,7 @@ routes:
 		t.Fatalf("config load: %v", err)
 	}
 	metrics, _, _ := telemetry.Init()
-	srv = New(cfg, metrics, nil)
+	srv = New("test", cfg, metrics, nil)
 	return srv, backend
 }
 
@@ -216,7 +216,7 @@ routes:
 `, backend.URL)
 	cfg, _ := config.Load(writeTestConfig(t, yaml))
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":    "m",
@@ -265,7 +265,7 @@ routes:
 `, backend.URL)
 	cfg, _ := config.Load(writeTestConfig(t, yaml))
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"model": "m",
@@ -320,7 +320,7 @@ routes:
 `, backend.URL)
 	cfg, _ := config.Load(writeTestConfig(t, yaml))
 	metrics, _, _ := telemetry.Init()
-	s := New(cfg, metrics, nil)
+	s := New("test", cfg, metrics, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{"model": "m", "prompt": "hello"})
 	req := httptest.NewRequest("POST", "/v1/completions", bytes.NewReader(body))
