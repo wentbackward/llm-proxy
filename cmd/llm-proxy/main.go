@@ -162,6 +162,9 @@ func main() {
 	if err := proxyServer.Shutdown(ctx); err != nil {
 		log.Printf("[llm-proxy] proxy shutdown: %v", err)
 	}
+	if srv.Balancer() != nil {
+		srv.Balancer().Stop()
+	}
 	if metricsServer != nil {
 		if err := metricsServer.Shutdown(ctx); err != nil {
 			log.Printf("[llm-proxy] metrics shutdown: %v", err)

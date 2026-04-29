@@ -101,6 +101,11 @@ func (s *Server) Capture() *capture.Capture {
 	return s.capture.Load()
 }
 
+// Balancer returns the current balancer (may be nil if no groups configured).
+func (s *Server) Balancer() *balancer.Balancer {
+	return s.balancer
+}
+
 // Reload atomically swaps in a new config and router.
 // In-flight requests continue with the old config.
 func (s *Server) Reload(cfg *config.Config) {
