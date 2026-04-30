@@ -16,10 +16,10 @@ An enterprise grade, highly performant route virtualizer for your infrerence wor
 
 |   |   |
 | --- | --- |
-| **Simplify** and connect your agentic process designers and software engineers to the models they need | **Manage** inference backends across any disparate landscape of providers, local or in the cloud |
-| **Smart** load-balancing increases concurrent throughput and ensures maximum benefit of KV cache utlization | **Save** time and money |
-| **Reliable** low latency and highly available |  **Curate and Control** approved models |
-| **Protect** your API keys, control access |  **Inspect** and debug messages to speed up analysis and problem solving |
+| **Accelerate** and connect your agentic process designers and software engineers to the models they need | **Manage** inference backends across any disparate landscape of providers, local or in the cloud |
+| **Simple** to deploy in minutes, serve thousands of users with minimal hardawre | **Secure** by default - **protect** your traffic, your API keys and control access |
+| **Curate and Control** approved models | **Reliable** low latency and highly available  |
+| Smart **load-balancing** increases concurrent throughput and ensures maximum benefit of KV cache utlization | **Inspect** and debug messages to speed up analysis and problem solving  |
 | **Set** and **clamp** sampling parameters to ensure optimal model performance | Deploy **defenders** like loop detector and supress 'zero' messages before they waste valuable tokens |
 
 ## Virtualize
