@@ -97,19 +97,20 @@ func (p *PortRange) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type Backend struct {
-	ID               string    `yaml:"id"`
-	Type             string    `yaml:"type"` // openai | anthropic | ollama
-	BaseURL          string    `yaml:"base_url"`
-	APIKey           string    `yaml:"api_key"`
-	AuthType         string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
-	Group            string    `yaml:"group"`     // optional; LB group name
-	TimeoutSeconds   int       `yaml:"timeout_seconds"`
-	MaxConcurrency   int       `yaml:"max_concurrency"`    // 0 = unlimited; limits in-flight requests to this backend
-	SkipProbe        bool      `yaml:"skip_probe"`         // skip /v1/models health check at startup/SIGHUP
-	Default          bool      `yaml:"default"`            // target for passthrough_unrouted and /v1/models; at most one backend may set this
-	Ports            PortRange `yaml:"ports"`              // expand this backend into one per port; use {port} in id and base_url
-	Headers          HeadersOp `yaml:"headers"`            // outbound header manipulation applied to every request to this backend
-	DropEmptyContent *bool     `yaml:"drop_empty_content"` // override global; nil = inherit
+	ID               string               `yaml:"id"`
+	Type             string               `yaml:"type"` // openai | anthropic | ollama
+	BaseURL          string               `yaml:"base_url"`
+	APIKey           string               `yaml:"api_key"`
+	AuthType         string               `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
+	Group            string               `yaml:"group"`     // optional; LB group name
+	TimeoutSeconds   int                  `yaml:"timeout_seconds"`
+	MaxConcurrency   int                  `yaml:"max_concurrency"`    // 0 = unlimited; limits in-flight requests to this backend
+	SkipProbe        bool                 `yaml:"skip_probe"`         // skip /v1/models health check at startup/SIGHUP
+	Default          bool                 `yaml:"default"`            // target for passthrough_unrouted and /v1/models; at most one backend may set this
+	Ports            PortRange            `yaml:"ports"`              // expand this backend into one per port; use {port} in id and base_url
+	Headers          HeadersOp            `yaml:"headers"`            // outbound header manipulation applied to every request to this backend
+	DropEmptyContent *bool                `yaml:"drop_empty_content"` // override global; nil = inherit
+	Defenders        *RouteDefenderConfig `yaml:"defenders"`
 }
 
 type AutoRoute struct {
@@ -163,6 +164,7 @@ type Route struct {
 	Inject           map[string]interface{} `yaml:"inject"`             // deep-merged into the body before send; route wins per leaf key
 	Headers          HeadersOp              `yaml:"headers"`            // outbound header manipulation applied after backend.Headers (route wins on conflict)
 	DropEmptyContent *bool                  `yaml:"drop_empty_content"` // override backend/global; nil = inherit
+	Defenders        *RouteDefenderConfig   `yaml:"defenders"`
 }
 
 type JournalConfig struct {
@@ -184,6 +186,7 @@ type Config struct {
 	Telemetry         TelemetryConfig         `yaml:"telemetry"`
 	Journal           JournalConfig           `yaml:"journal"`
 	SigMessageCapture SigMessageCaptureConfig `yaml:"sig_message_capture"`
+	Defenders         DefenderConfig          `yaml:"defenders"`
 	Backends          []Backend               `yaml:"backends"`
 	Routes            []Route                 `yaml:"routes"`
 	Groups            map[string]*GroupConfig `yaml:"groups"`
@@ -541,4 +544,137 @@ func (c *Config) ShouldDropEmptyContent(route *Route, backend *Backend) bool {
 	}
 	// Global default
 	return c.Server.DropEmptyContent
+}
+
+// --- Request Defenders ---
+
+// DefenderConfig holds global defaults for request defenders.
+// Routes can override per-key.
+type DefenderConfig struct {
+	LoopDetection        *LoopDetectionConfig        `yaml:"loop_detection"`
+	ZeroContentDetection *ZeroContentDetectionConfig `yaml:"zero_content_detection"`
+}
+
+// LoopDetectionConfig configures the loop detector.
+type LoopDetectionConfig struct {
+	Enabled              bool   `yaml:"enabled"`
+	ConsecutiveThreshold int    `yaml:"consecutive_threshold"`
+	WindowSeconds        int    `yaml:"window_seconds"`
+	Action               string `yaml:"action"`
+	EscalateAfter        int    `yaml:"escalate_after"`
+	EscalateAction       string `yaml:"escalate_action"`
+}
+
+// ZeroContentDetectionConfig configures the zero-content detector.
+type ZeroContentDetectionConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	MinUserContentChars int    `yaml:"min_user_content_chars"`
+	MinTotalInputTokens int    `yaml:"min_total_input_tokens"`
+	Action              string `yaml:"action"`
+}
+
+// RouteDefenderConfig allows per-route override of defender settings.
+type RouteDefenderConfig struct {
+	LoopDetection        *LoopDetectionConfig        `yaml:"loop_detection"`
+	ZeroContentDetection *ZeroContentDetectionConfig `yaml:"zero_content_detection"`
+}
+
+// GetLoopDetection resolves loop detection config for a route,
+// applying the cascading resolution: per-route > global > defaults.
+func (c *Config) GetLoopDetection(route *Route) LoopDetectionConfig {
+	cfg := LoopDetectionConfig{
+		Enabled:              true,
+		ConsecutiveThreshold: 3,
+		WindowSeconds:        60,
+		Action:               "inject_forcing_message",
+		EscalateAfter:        2,
+		EscalateAction:       "refuse_429",
+	}
+
+	// Global defaults
+	if c.Defenders.LoopDetection != nil {
+		glbl := c.Defenders.LoopDetection
+		if glbl.Enabled != cfg.Enabled {
+			cfg.Enabled = glbl.Enabled
+		}
+		if glbl.ConsecutiveThreshold > 0 {
+			cfg.ConsecutiveThreshold = glbl.ConsecutiveThreshold
+		}
+		if glbl.WindowSeconds > 0 {
+			cfg.WindowSeconds = glbl.WindowSeconds
+		}
+		if glbl.Action != "" {
+			cfg.Action = glbl.Action
+		}
+		if glbl.EscalateAfter > 0 {
+			cfg.EscalateAfter = glbl.EscalateAfter
+		}
+		if glbl.EscalateAction != "" {
+			cfg.EscalateAction = glbl.EscalateAction
+		}
+	}
+
+	// Per-route override
+	if route != nil && route.Defenders != nil && route.Defenders.LoopDetection != nil {
+		rt := route.Defenders.LoopDetection
+		cfg.Enabled = rt.Enabled
+		if rt.ConsecutiveThreshold > 0 {
+			cfg.ConsecutiveThreshold = rt.ConsecutiveThreshold
+		}
+		if rt.WindowSeconds > 0 {
+			cfg.WindowSeconds = rt.WindowSeconds
+		}
+		if rt.Action != "" {
+			cfg.Action = rt.Action
+		}
+		if rt.EscalateAfter > 0 {
+			cfg.EscalateAfter = rt.EscalateAfter
+		}
+		if rt.EscalateAction != "" {
+			cfg.EscalateAction = rt.EscalateAction
+		}
+	}
+	return cfg
+}
+
+// GetZeroContentDetection resolves zero-content detection config for a route,
+// applying the cascading resolution: per-route > global > defaults.
+func (c *Config) GetZeroContentDetection(route *Route) ZeroContentDetectionConfig {
+	cfg := ZeroContentDetectionConfig{
+		Enabled:             true,
+		MinUserContentChars: 10,
+		MinTotalInputTokens: 2000,
+		Action:              "refuse_400",
+	}
+
+	// Global defaults
+	if c.Defenders.ZeroContentDetection != nil {
+		glbl := c.Defenders.ZeroContentDetection
+		cfg.Enabled = glbl.Enabled
+		if glbl.MinUserContentChars > 0 {
+			cfg.MinUserContentChars = glbl.MinUserContentChars
+		}
+		if glbl.MinTotalInputTokens > 0 {
+			cfg.MinTotalInputTokens = glbl.MinTotalInputTokens
+		}
+		if glbl.Action != "" {
+			cfg.Action = glbl.Action
+		}
+	}
+
+	// Per-route override
+	if route != nil && route.Defenders != nil && route.Defenders.ZeroContentDetection != nil {
+		rt := route.Defenders.ZeroContentDetection
+		cfg.Enabled = rt.Enabled
+		if rt.MinUserContentChars > 0 {
+			cfg.MinUserContentChars = rt.MinUserContentChars
+		}
+		if rt.MinTotalInputTokens > 0 {
+			cfg.MinTotalInputTokens = rt.MinTotalInputTokens
+		}
+		if rt.Action != "" {
+			cfg.Action = rt.Action
+		}
+	}
+	return cfg
 }

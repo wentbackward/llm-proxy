@@ -39,14 +39,15 @@ func requestID() string {
 
 // Server handles all proxy traffic.
 type Server struct {
-	buildMode string
-	version   string
-	cfg       atomic.Pointer[config.Config]
-	rtr       atomic.Pointer[router.Router]
-	metrics   *telemetry.Metrics
-	journal   *journal.Journal                // nil if journal disabled
-	capture   atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
-	balancer  *balancer.Balancer              // nil if no groups configured
+	buildMode    string
+	version      string
+	cfg          atomic.Pointer[config.Config]
+	rtr          atomic.Pointer[router.Router]
+	metrics      *telemetry.Metrics
+	journal      *journal.Journal                // nil if journal disabled
+	capture      atomic.Pointer[capture.Capture] // nil value = capture disabled; rebuilt on Reload
+	balancer     *balancer.Balancer              // nil if no groups configured
+	loopDetector *loopDetector                   // loop detection state
 
 	transport  *http.Transport          // shared connection pool for all backends
 	mu         sync.RWMutex             // guards semaphores
@@ -73,6 +74,7 @@ func New(version, buildMode string, cfg *config.Config, metrics *telemetry.Metri
 	s.rtr.Store(router.New(cfg))
 	s.buildSemaphores(cfg)
 	s.applyCaptureConfig(cfg)
+	s.loopDetector = &loopDetector{state: make(map[string]*loopEntry)}
 	if len(cfg.Groups) > 0 {
 		s.balancer = balancer.New(cfg)
 	}
@@ -117,6 +119,7 @@ func (s *Server) Reload(cfg *config.Config) {
 	s.cfg.Store(cfg)
 	s.buildSemaphores(cfg)
 	s.applyCaptureConfig(cfg)
+	s.loopDetector = &loopDetector{state: make(map[string]*loopEntry)}
 
 	// Swap balancer on reload
 	if s.balancer != nil {
@@ -390,6 +393,36 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			modelName, b.ID, r.RemoteAddr, r.UserAgent())
 	} else {
 		realModel = res.RealModel
+
+		// ── Request defenders (pre-routing) ────────────────────────────────
+		// Compute affinity key for loop detection (may be empty for non-LB routes)
+		var affKey string
+		if res.Group != "" && cfg.Groups[res.Group] != nil {
+			grpCfg := cfg.Groups[res.Group]
+			switch grpCfg.Affinity.Key {
+			case "first_user_message":
+				affKey = balancer.FirstUserMessageKey(body, grpCfg.Affinity.MaxContentBytes)
+			default:
+				headerName := strings.TrimPrefix(grpCfg.Affinity.Key, "header:")
+				affKey = balancer.HeaderAffinityKey(r.Header, headerName)
+			}
+		}
+		if affKey == "" {
+			affKey = modelName // fallback: use model name as identity
+		}
+
+		if short, status, resp, defHeader := checkDefenders(s.loopDetector, cfg, res.Route, body, affKey); short {
+			if defHeader != "" {
+				w.Header().Set("X-hikyaku-defender", defHeader)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			w.Write([]byte(resp)) //nolint:gosec,errcheck // defender response is constructed internally, not user input
+			return
+		}
+
+		// Store affinity key for use in LB selection below
+		// (we recompute it below inside the LB block for consistency)
 
 		// LB group: select backend at runtime
 		if res.Group != "" && s.balancer != nil {
