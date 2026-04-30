@@ -56,7 +56,7 @@ groups:
   g1:
     strategy: sticky_least_loaded
     affinity:
-      key: canonical_prefix
+      key: first_user_message
       prefix_bytes: 1024
       ttl_seconds: 3600
       max_entries: 10000

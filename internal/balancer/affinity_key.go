@@ -1,46 +1,50 @@
 package balancer
 
 import (
-	"bytes"
 	"net/http"
 	"strconv"
 	"strings"
 )
 
-const (
-	unitSeparator   = '\x1f'
-	recordSeparator = '\x1e'
-)
+// FirstUserMessageKey computes a 16-char hex affinity key from the first
+// user message's content. It walks messages[] skipping system, assistant,
+// and tool roles until it finds the first role: "user", then hashes its
+// content (capped at maxBytes).
+//
+// Rationale: the first user message is invariant across all turns of a
+// session (subsequent turns append to the end), making it a stable
+// fingerprint. Different sessions typically open with different prompts,
+// giving natural separation.
+func FirstUserMessageKey(body map[string]interface{}, maxBytes int) string {
+	messages, ok := body["messages"].([]interface{})
+	if !ok || len(messages) == 0 {
+		return ""
+	}
 
-// CanonicalPrefix builds a deterministic byte representation of the leading
-// conversation, mirroring how the chat template lays out tokens.
-func CanonicalPrefix(messages []interface{}, n int) []byte {
-	var buf bytes.Buffer
-	buf.Grow(n)
-	for _, m := range messages {
-		msg, ok := m.(map[string]interface{})
+	for _, raw := range messages {
+		msg, ok := raw.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		role, _ := msg["role"].(string)
-		buf.WriteString(role)
-		buf.WriteByte(unitSeparator)
-		buf.WriteString(extractText(msg))
-		buf.WriteByte(recordSeparator)
-		if buf.Len() >= n {
-			break
+		if role != "user" {
+			continue
 		}
+
+		content := stringifyContent(msg)
+		if len(content) > maxBytes {
+			content = content[:maxBytes]
+		}
+		h := fnv64a([]byte(content))
+		return strconv.FormatUint(h, 16)
 	}
-	out := buf.Bytes()
-	if len(out) > n {
-		out = out[:n]
-	}
-	return out
+
+	return "" // no user message found
 }
 
-// extractText concatenates text parts from a message's content field.
+// stringifyContent concatenates text parts from a message's content field.
 // Handles string content and multipart arrays.
-func extractText(msg map[string]interface{}) string {
+func stringifyContent(msg map[string]interface{}) string {
 	switch content := msg["content"].(type) {
 	case string:
 		return content
@@ -61,19 +65,14 @@ func extractText(msg map[string]interface{}) string {
 	return ""
 }
 
-// AffinityKey computes a 16-char hex key from the request body.
-// Returns empty string if messages are missing or empty.
-func AffinityKey(body map[string]interface{}, prefixBytes int) string {
-	messages, ok := body["messages"].([]interface{})
-	if !ok || len(messages) == 0 {
-		return ""
-	}
-	prefix := CanonicalPrefix(messages, prefixBytes)
-	h := fnv64a(prefix)
-	return strconv.FormatUint(h, 16)
+// HeaderAffinityKey returns the trimmed value of the named header,
+// or empty string if absent.
+func HeaderAffinityKey(header http.Header, name string) string {
+	v := header.Get(name)
+	return strings.TrimSpace(strings.ToLower(v))
 }
 
-// fnv64a is a hand-rolled FNV-64a hash. No external dependency needed.
+// fnv64a is a hand-rolled FNV-64a hash. Shared by affinity_key and select.
 func fnv64a(data []byte) uint64 {
 	const (
 		offset64 = 14695981039346656037
@@ -85,11 +84,4 @@ func fnv64a(data []byte) uint64 {
 		h *= prime64
 	}
 	return h
-}
-
-// HeaderAffinityKey returns the trimmed value of the named header,
-// or empty string if absent.
-func HeaderAffinityKey(header http.Header, name string) string {
-	v := header.Get(name)
-	return strings.TrimSpace(strings.ToLower(v))
 }

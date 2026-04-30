@@ -55,7 +55,7 @@ Implications for routing:
 
 ```
 ┌─────────┐      ┌──────────────────────────┐      ┌────────────┐
-│ client  │──┬──▶│  hikyaku               │──┬──▶│ backend A  │
+│ client  │──┬──▶│  hikyaku                 │──┬──▶│ backend A  │
 └─────────┘  │   │                          │  │   │ vLLM/SGLang│
              │   │  ┌────────────────────┐  │  │   └────────────┘
              │   │  │ affinity table     │  │  │
@@ -96,8 +96,8 @@ routes:
       #   round_robin         — simple distribution, no affinity (cache-cold)
       #   single              — single backend (existing behavior)
     affinity:
-      key: canonical_prefix      # canonical_prefix | header:NAME | none
-      prefix_bytes: 1024         # for canonical_prefix only
+      key: first_user_message    # first_user_message | header:NAME | none
+      max_content_bytes: 2048    # safety cap on hashed content
       ttl_seconds: 3600          # evict idle entries after this
       max_entries: 10000         # LRU cap
     overload:                    # used by sticky_least_loaded to bail off pin
@@ -211,64 +211,74 @@ type AffinityTable struct {
 
 ## Affinity key computation
 
-For `key: canonical_prefix`, build a deterministic byte representation of
-the leading conversation, hash with xxhash64:
+For `key: first_user_message`, hash the **first user message's content**
+with xxhash64. Skip the system message and any subsequent turns.
 
 ```go
-const (
-    UnitSeparator    = '\x1f'
-    RecordSeparator  = '\x1e'
-)
-
-func canonicalPrefix(messages []Message, n int) []byte {
-    var buf bytes.Buffer
-    buf.Grow(n)
-    for _, m := range messages {
-        buf.WriteString(m.Role)
-        buf.WriteByte(UnitSeparator)
-        // Content can be a string or a multipart array of parts.
-        // For multipart, concatenate the text parts in order.
-        buf.WriteString(stringifyContent(m.Content))
-        buf.WriteByte(RecordSeparator)
-        if buf.Len() >= n {
-            break
-        }
-    }
-    out := buf.Bytes()
-    if len(out) > n {
-        out = out[:n]
-    }
-    return out
-}
-
 func affinityKey(req Request) string {
-    if len(req.Messages) == 0 {
-        return ""  // no key → fall through to least-loaded
+    for _, m := range req.Messages {
+        if m.Role != "user" {
+            continue   // skip system / prior assistant / tool turns
+        }
+        content := stringifyContent(m.Content)
+        if len(content) > cfg.MaxContentBytes {
+            content = content[:cfg.MaxContentBytes]   // safety cap, e.g. 2048
+        }
+        h := xxhash.Sum64String(content)
+        return strconv.FormatUint(h, 16)  // 16-char hex key
     }
-    prefix := canonicalPrefix(req.Messages, cfg.PrefixBytes)
-    h := xxhash.Sum64(prefix)
-    return strconv.FormatUint(h, 16)  // 16-char hex key
+    return ""   // no user message → fall through to least-loaded
 }
 ```
 
 ### Why this fingerprint
 
-- **Walks `messages[]` in order**, mirroring how the chat template lays
-  out tokens. Same session always produces the same leading bytes
-  regardless of how many turns deep it is.
-- **Captures both system prompt and first user turn** in the typical
-  1024-byte window. Sessions sharing a system prompt naturally coalesce
-  to the same backend, amortizing the system-prompt KV.
-- **Distinguishes sessions by their opening user prompt** once they've
-  diverged past the system prompt.
-- **Resilient to:** missing system prompt (just hashes the user message),
-  multiple system prompts, multipart content (text parts concatenated).
+- **Stable across all turns of a session.** The first user message is
+  set once (the opening prompt) and remains the same in every subsequent
+  request as the conversation grows. New turns append to `messages[]`
+  but the first user message is invariant.
+- **Different across distinct sessions.** Each session opens with a
+  unique user prompt, so the hash distinguishes them naturally.
+- **Skips the system message.** System prompts are usually shared across
+  sessions of the same client/route, so hashing them would collapse
+  many distinct sessions to the same backend. Skipping system means
+  cache locality across sessions for the system-prompt KV is preserved
+  *probabilistically* (sessions land on a few backends, all of which
+  cache the system prompt after the first request) without being a
+  hard pin.
+- **Skips assistant/tool turns.** These vary across turns within one
+  session, so including them would make the hash unstable.
+- **Costs ~µs per request.** Hashing 1-2 KB with xxhash is essentially
+  free; no JSON encoding of the whole body.
+- **Resilient to:** multipart content (text parts concatenated),
+  missing system prompt (handles the no-system case identically),
+  multiple system prompts.
 - **Vulnerable to:** intentional history truncation (CLI drops oldest
-  turns when context grows). When the leading bytes shift, affinity
-  re-keys and may flip backend. By that point the session is many turns
-  in, prefix cache is hot on the original backend, and a flip is costly.
-  Mitigation: optional second fingerprint (last user message hash) for
-  re-pinning on long sessions; defer to Phase 2 unless observed.
+  turns when context grows). When the first user message disappears,
+  affinity re-keys to the *new* first user message, possibly flipping
+  backend. By that point the session is many turns deep and the
+  backend's prefix cache is heavily warmed — a flip is expensive.
+  Mitigation: optional second fingerprint (hash of the second-newest
+  user message) for re-pinning on truncated sessions; defer to Phase 2
+  unless observed.
+
+### Note on `key: canonical_prefix` (deprecated)
+
+An earlier version of this spec proposed hashing a "leading byte
+prefix" of `messages[]`, capped at `prefix_bytes` (default 1024).
+That algorithm has two failure modes:
+
+- **Short conversations** (< prefix_bytes total): the byte cap never
+  triggers, so the loop walks the entire `messages[]` array and the
+  hash *changes every turn*. Affinity breaks.
+- **Long conversations sharing a system prompt** (>= prefix_bytes
+  in the system message alone): the cap triggers inside the system
+  message, so all sessions sharing that system prompt hash to the
+  same key. Sessions collapse onto one backend.
+
+Test results showed ~44% sticky rate with the short-conversation case
+under the test harness, exactly as predicted. Use `first_user_message`
+instead.
 
 ### `key: header:NAME`
 
@@ -280,7 +290,7 @@ affinity:
 ```
 
 Look up `req.Headers["X-Session-Id"]`, lowercase trim, use as the affinity
-key directly. Falls through to `canonical_prefix` if the header is absent.
+key directly. Falls through to `first_user_message` if the header is absent.
 
 ### `key: none`
 
@@ -353,17 +363,73 @@ func pickLeastLoaded(pool []*Backend) *Backend {
 
 ## Health checking
 
-A simple loop, one goroutine per backend:
+Health derives from whichever signal is available, in this priority:
+
+1. **Metrics-as-health (preferred when scraping is enabled).** If
+   `metrics_scrape.enabled` is true AND the capability probe succeeded
+   on this backend, the metrics scrape *is* the health signal. A
+   successful scrape (200 + parseable Prometheus text) every interval
+   = healthy; consecutive scrape failures count toward
+   `unhealthy_after`. Don't run a separate `/models` check.
+
+2. **`/models` fallback (when metrics aren't available).** Backends
+   without a working `/metrics` endpoint fall back to a dedicated
+   `/models` poll using the dedicated health-check loop. Same
+   `unhealthy_after` semantics, separate goroutine.
+
+The reason: metrics scraping is *strictly more informative* than a
+`/models` poll. A successful scrape proves the HTTP server is alive,
+the response format is valid (no panic, no GC stall mid-emit), and you
+get fresh load data. Hitting `/models` separately every health interval
+is redundant work once `/metrics` is established as a per-tick
+heartbeat.
 
 ```go
-func healthLoop(b *Backend, route Route) {
+// One goroutine per backend handles BOTH scraping and health for that
+// backend. The goroutine is selected at startup based on capability:
+func runBackendLoop(b *Backend, route Route) {
+    if b.MetricsEnabled {
+        runMetricsAndHealthLoop(b, route)   // scrape /metrics, health derived
+    } else {
+        runHealthOnlyLoop(b, route)         // poll /models
+    }
+}
+
+func runMetricsAndHealthLoop(b *Backend, route Route) {
+    ticker := time.NewTicker(route.MetricsScrape.Interval)
+    defer ticker.Stop()
+    for range ticker.C {
+        text, err := scrapeMetrics(b.URL + route.MetricsScrape.Path)
+        if err != nil {
+            b.ConsecutiveFailures++
+            if b.ConsecutiveFailures >= route.HealthCheck.UnhealthyAfter {
+                b.Healthy = false
+            }
+            continue
+        }
+        running, waiting, kvPct, ok := parseMetrics(text, b.EngineType)
+        if !ok {
+            b.ConsecutiveFailures++
+            if b.ConsecutiveFailures >= route.HealthCheck.UnhealthyAfter {
+                b.Healthy = false
+            }
+            continue
+        }
+        b.RunningReqs = running
+        b.WaitingReqs = waiting
+        b.KVCachePct = kvPct
+        b.LastMetricsUpdate = time.Now()
+        b.Healthy = true
+        b.ConsecutiveFailures = 0
+    }
+}
+
+func runHealthOnlyLoop(b *Backend, route Route) {
     ticker := time.NewTicker(route.HealthCheck.Interval)
     defer ticker.Stop()
     for range ticker.C {
-        ctx, cancel := context.WithTimeout(context.Background(), route.HealthCheck.Timeout)
-        resp, err := http.Get(b.URL + route.HealthCheck.Path)
-        cancel()
-
+        resp, err := httpGetWithTimeout(b.URL + route.HealthCheck.Path,
+                                        route.HealthCheck.Timeout)
         if err == nil && resp.StatusCode == 200 {
             b.Healthy = true
             b.ConsecutiveFailures = 0
@@ -371,7 +437,6 @@ func healthLoop(b *Backend, route Route) {
             b.ConsecutiveFailures++
             if b.ConsecutiveFailures >= route.HealthCheck.UnhealthyAfter {
                 b.Healthy = false
-                log.Printf("backend %s marked unhealthy: %v", b.URL, err)
             }
         }
         if resp != nil {
@@ -387,32 +452,20 @@ cache once it's available again.
 
 ## Metrics scraping (when enabled)
 
-```go
-func metricsLoop(b *Backend, route Route) {
-    ticker := time.NewTicker(route.MetricsScrape.Interval)
-    defer ticker.Stop()
-    for range ticker.C {
-        text, err := scrapeMetrics(b.URL + route.MetricsScrape.Path)
-        if err != nil {
-            // Don't disable; just leave LastMetricsUpdate stale.
-            // Stale-threshold logic in isOverloaded handles it.
-            continue
-        }
-        running, waiting, kvPct, ok := parseMetrics(text, b.EngineType)
-        if !ok {
-            continue
-        }
-        b.RunningReqs = running
-        b.WaitingReqs = waiting
-        b.KVCachePct = kvPct
-        b.LastMetricsUpdate = time.Now()
-    }
-}
-```
+Metrics scraping happens inside `runMetricsAndHealthLoop` (see "Health
+checking" above) — there's no separate metrics goroutine. Each tick
+hits `/metrics`, parses the response, updates the load gauges on the
+`Backend` struct, AND maintains the health signal. One round-trip per
+interval per backend covers both concerns.
 
 `parseMetrics` is a simple line scanner over Prometheus text format; no
 need for a full Prometheus client library. Match by metric name (per the
-mapping table above), pick the gauge value.
+[mapping table](#backend-capability-probing)), pick the gauge value.
+
+If the capability probe at startup didn't find a parseable `/metrics`
+response, this backend gets the `/models`-only health loop instead and
+never has live load gauges — `isOverloaded` and `pickLeastLoaded` fall
+back to the local `InFlightLocal` counter for that backend.
 
 ## Failure modes and behavior
 
@@ -424,8 +477,178 @@ mapping table above), pick the gauge value.
 | All backends overloaded | Pick least-bad (smallest `load_score`). Don't 503; the queue at the backend is faster than tearing down and retrying. |
 | Metrics endpoint flaps | Use last-known values until `stale_threshold_seconds`, then defer to local in-flight count. |
 | New backend added via SIGHUP reload | Probe metrics, start health-check loop, mark healthy after first OK probe. Affinity entries pinned to *removed* backends should be evicted on reload. |
-| Burst of new sessions arriving simultaneously | Each gets a fresh affinity key (by canonical_prefix); least-loaded distributes them. Affinity entries created in a tight window can briefly imbalance — this is fine, settles within a few seconds. |
+| Burst of new sessions arriving simultaneously | Each gets a fresh affinity key (hash of first user message); least-loaded distributes them. Affinity entries created in a tight window can briefly imbalance — this is fine, settles within a few seconds. |
 | Two sessions with identical opening prompts | Same affinity key → both pin to same backend. Cache locality across sessions is actually a *feature* here. Slight contention; not catastrophic. |
+
+## Request defenders
+
+A pair of pre-routing checks that run **before** backend selection and can
+short-circuit obviously-pathological requests. Both are independently
+configurable: a global default + a per-route override (per-route wins).
+
+The two defenders address different failure modes that can't be fixed at
+the sampler level:
+
+- **Loop detection** — the same request body is being re-sent repeatedly
+  by an agent's retry loop, producing the same model output, accomplishing
+  nothing but burning tokens.
+- **Zero-content detection** — the request carries a huge system prompt
+  and tool definitions but the actual user content is empty or trivial,
+  meaning tens of thousands of tokens get processed with no useful work
+  attached.
+
+### Detection signals (live-observed)
+
+The signature of an agent retry loop, captured in production:
+
+```
+Engine 000: Running: 0-1, KV cache: 11.2%, Prefix cache hit rate: 97.6%
+SpecDecoding: Mean acceptance length: 3.00 (max), per-position 1.000, 1.000
+              Avg Draft acceptance rate: 100.0%
+Repeated request: same `(affinity_key, hash(messages[-1]))` ≥ 3 times in 60s
+```
+
+100% MTP acceptance + ~98% prefix cache hit + identical body hash on
+consecutive requests is the canonical signature. It cannot occur in
+healthy multi-turn work — even the most predictable boilerplate output
+doesn't sustain 100% draft acceptance for long.
+
+The proxy doesn't need MTP metrics to detect this — it can use **just the
+request body hash repetition** as the primary signal, with backend
+metrics (cache hit rate, acceptance) as an optional confirmation when
+they're available.
+
+### Loop detection
+
+**Signal:** the same `(affinity_key, hash(messages[-1].content))` arrives
+≥ N times within a sliding window. Default N=3, window=60s.
+
+Why hash only the last user message rather than the full body: the prior
+turns are by definition shared (it's a multi-turn conversation), so the
+full body always "matches" in some sense. The last user message is the
+delta that the agent is asking the model to act on. If that delta is
+identical across consecutive requests, the agent is asking the same
+question repeatedly.
+
+**State:**
+
+```go
+type LoopState struct {
+    LastBodyHash    string
+    Count           int
+    FirstSeen       time.Time
+}
+// Map: (affinityKey, lastUserMsgHash) → LoopState
+// LRU + TTL bounded.
+```
+
+**Action choices** (configurable, default `inject_forcing_message`):
+
+- `inject_forcing_message` — before forwarding the Nth identical request,
+  prepend a system message:
+  > "Your previous N attempts of this exact request returned the same
+  > result. Stop retrying. Either fix the underlying issue (e.g. read
+  > the tool's error output and address it directly) or stop and surface
+  > to the human."
+  After injection, reset the counter for that key. If a further M
+  identical requests arrive after the injection, escalate to `refuse_429`.
+- `refuse_429` — return HTTP 429 with a structured error explaining the
+  loop was detected. Client sees an explicit failure rather than a
+  silent token burn.
+- `drain_to_idle` — let the request through but lower its routing priority
+  and prefer pinning to a backend with idle capacity, isolating the
+  burning session from healthy traffic.
+
+`inject_forcing_message` is the recommended default — it gives the agent
+a chance to break out of the loop using its existing reasoning path,
+rather than failing the request hard.
+
+### Zero-content detection
+
+**Signal:** the request's effective user content is below a threshold
+relative to the total token cost. Concretely:
+
+- `len(stripped(last_user_message.content)) < min_user_content_chars`
+  (default `min_user_content_chars=10`)
+- Combined with substantial system + tool overhead in the same request
+  (e.g. `total_input_tokens >= 2000` to avoid flagging genuinely small
+  requests).
+
+This catches the openclaw-style pattern of periodically re-sending the
+full system prompt + tool definitions with no actual user query attached
+— tens of thousands of input tokens processed for no useful output.
+
+**Action choices** (configurable, default `refuse_400`):
+
+- `refuse_400` — return HTTP 400 with body explaining "no user content".
+  Cheapest; client should retry with content.
+- `inject_minimal_response` — return an empty assistant message via the
+  proxy without hitting the backend. Client sees a 200 OK with no
+  generated tokens; backend is never bothered. Useful when the client
+  can't be modified to handle 400s gracefully.
+
+`refuse_400` is the preferred default — it surfaces the bug to the
+caller, which is more informative than silent suppression.
+
+### Configuration
+
+Both defenders share the same on/off switch shape: a top-level default
+plus per-route opt-out/opt-in.
+
+```yaml
+defenders:                      # global defaults
+  loop_detection:
+    enabled: true
+    consecutive_threshold: 3
+    window_seconds: 60
+    action: inject_forcing_message
+    escalate_after: 2           # if forcing message doesn't break it
+    escalate_action: refuse_429
+  zero_content_detection:
+    enabled: true
+    min_user_content_chars: 10
+    min_total_input_tokens: 2000
+    action: refuse_400
+
+routes:
+  gresh-coder:
+    # ... routing config ...
+    defenders:                  # per-route override (any key absent → inherit global)
+      loop_detection:
+        enabled: true           # explicit; matches global
+      zero_content_detection:
+        enabled: false          # opt out for this route specifically
+```
+
+**Resolution rule:** for each defender at request time, look up the
+per-route block first; fall back to the global default if absent.
+Per-route `enabled: false` always wins, even if global is `true`. There
+is no inheritance of inner fields — if a route specifies a defender, it
+must specify all the fields it cares about (or the global defaults
+apply for missing fields, which is the usual YAML merge behavior).
+
+### Implementation order
+
+Both defenders are independently implementable and can land in any
+phase. Because zero-content detection is already implemented (currently
+always-on), the proxy work is just wiring it into the new global +
+per-route config and exposing the on/off switches. Loop detection is
+new code: the body-hash + counter map + injection logic.
+
+### Observability
+
+Each defender should emit proxy-side metrics:
+
+- `hikyaku_loop_detection_triggered_total{route="..."}`
+- `hikyaku_loop_detection_escalated_total{route="..."}`
+- `hikyaku_zero_content_blocked_total{route="..."}`
+
+And add headers on outgoing responses for debugging:
+
+- `X-hikyaku-defender: loop_detection_inject` (when intervention fires)
+- `X-hikyaku-defender: zero_content_blocked` (when zero-content rejects)
+
+These let the operator see how often defenders fire without scraping logs.
 
 ## Phasing
 
@@ -433,7 +656,7 @@ mapping table above), pick the gauge value.
 
 - Multi-backend per route in config
 - Health check loop
-- `sticky_least_loaded` strategy with `canonical_prefix` affinity
+- `sticky_least_loaded` strategy with `first_user_message` affinity
 - Local in-flight tracking (`InFlightLocal`) for overload detection
 - No metrics scraping yet — `MetricsEnabled = false` for all backends
 - LRU + TTL on affinity table
@@ -448,6 +671,21 @@ preserves cache locality.
 - Switch `pickLeastLoaded` and `isOverloaded` to use scraped metrics
 - `stale_metrics_action` config
 
+### Phase 2.5 — Request defenders (~1 day)
+
+Can land alongside Phase 1 or Phase 2; doesn't depend on telemetry
+scraping. Two independent pieces:
+
+- **Wire zero-content detection** into the global+per-route config
+  pattern. Existing implementation just needs a config switch and the
+  resolution rule (per-route → global → off).
+- **Add loop detection**: body-hash counter map (LRU-bounded, TTL-evicted),
+  forcing-message injector, escalation to `refuse_429` if the injection
+  doesn't break the loop. Reuses the same affinity-key derivation as
+  `sticky_least_loaded`.
+
+Defender-specific metrics + response headers (see "Observability" above).
+
 ### Phase 3 — Polish (optional)
 
 - Drain mode (mark a backend "draining" before stopping it; existing
@@ -458,11 +696,30 @@ preserves cache locality.
   measured CLI behavior, but cheap to add later)
 - Prometheus metrics exposed *by* the proxy itself: routing decisions,
   affinity hit rate, per-backend dispatch counts
+- **Gauge-freshness check**: a backend whose `/metrics` keeps returning
+  200 but whose `vllm:num_requests_running` doesn't change across N
+  scrapes despite the route being busy is probably engine-deadlocked.
+  Mark suspicious; consider draining new affinity until the gauges
+  recover. Defer until a real incident; cheap to add when it matters.
 
 ## Configuration example (full)
 
 ```yaml
 listen: 0.0.0.0:4000
+
+defenders:                      # global defaults; routes can override per-key
+  loop_detection:
+    enabled: true
+    consecutive_threshold: 3
+    window_seconds: 60
+    action: inject_forcing_message
+    escalate_after: 2
+    escalate_action: refuse_429
+  zero_content_detection:
+    enabled: true
+    min_user_content_chars: 10
+    min_total_input_tokens: 2000
+    action: refuse_400
 
 routes:
   gresh-coder:
@@ -472,8 +729,8 @@ routes:
       - url: http://192.168.1.247:3042
     strategy: sticky_least_loaded
     affinity:
-      key: canonical_prefix
-      prefix_bytes: 1024
+      key: first_user_message
+      max_content_bytes: 2048
       ttl_seconds: 3600
       max_entries: 10000
     overload:
@@ -481,14 +738,19 @@ routes:
       kv_cache_pct: 0.85
       stale_metrics_action: pin
     health_check:
-      path: /v1/models
+      # Used only for backends WITHOUT working /metrics. When metrics
+      # scraping is enabled and the capability probe succeeded, the
+      # scrape doubles as the health signal — this block is ignored.
+      path: /models                # default; hikyaku does not auto-add /v1/
       interval_seconds: 10
       timeout_seconds: 2
       unhealthy_after: 3
     metrics_scrape:
-      enabled: auto
+      enabled: auto                # auto = probe and use if available
       interval_seconds: 5
       stale_threshold_seconds: 30
+      # When enabled and successful, this loop also drives health.
+    # defenders: inherit globals (no per-route block here)
 
   gresh-general:
     # 35B currently single-replica — strategy: single is the existing path
@@ -496,6 +758,10 @@ routes:
     backends:
       - url: http://192.168.1.247:3040
     strategy: single
+    defenders:
+      zero_content_detection:
+        enabled: false          # this route legitimately receives content-light
+                                # warm-up requests; suppress the global default
 ```
 
 ## Test plan
@@ -516,6 +782,21 @@ routes:
    probe runs, new backend picks up new sessions, existing pins remain.
 8. **Load**: 100 sessions, 5 backends, mixed turn lengths. Distribution
    within ±10% of perfect, affinity hit rate above 95%.
+9. **Defender unit**: `loop_detection` counter increments on identical
+   `(key, body_hash)` arrivals; resets after `inject_forcing_message`
+   fires; escalates to `refuse_429` on `escalate_after` further
+   identical arrivals.
+10. **Defender unit**: `zero_content_detection` flags a request where
+    `last_user_message.content` is whitespace-only or shorter than
+    `min_user_content_chars`, AND total input is over
+    `min_total_input_tokens`. Doesn't flag short-but-meaningful queries
+    on small overall context.
+11. **Defender integration**: per-route `enabled: false` overrides
+    `enabled: true` global. Inverse direction also works.
+12. **Defender integration**: when loop detection injects a forcing
+    message, the forwarded body to the backend is correctly augmented;
+    the response's `X-hikyaku-defender` header is set; the metric
+    counter increments.
 
 ## Open questions for implementation
 

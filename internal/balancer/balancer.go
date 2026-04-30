@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 // for all groups in a config. One Balancer per Server.
 type Balancer struct {
 	groups map[string]*Group
+	hc     *hcClient
 	done   chan struct{}
 	wg     sync.WaitGroup
 }
@@ -23,10 +25,21 @@ type Group struct {
 	States   map[string]*BackendState // keyed by backend ID
 }
 
+// hcJob describes one health-check probe target.
+type hcJob struct {
+	id       string
+	url      string
+	interval time.Duration
+	timeout  time.Duration
+	path     string
+	failures int
+}
+
 // New creates a Balancer from the config and starts background goroutines.
 func New(cfg *config.Config) *Balancer {
 	b := &Balancer{
 		groups: make(map[string]*Group, len(cfg.Groups)),
+		hc:     newHCClient(cfg),
 		done:   make(chan struct{}),
 	}
 
@@ -57,9 +70,7 @@ func New(cfg *config.Config) *Balancer {
 		}
 	}
 
-	b.wg.Add(1)
-	go b.healthChecker()
-
+	b.startHealthChecks(cfg)
 	return b
 }
 
@@ -110,28 +121,93 @@ func (b *Balancer) Stop() {
 	b.wg.Wait()
 }
 
-// healthChecker runs a single goroutine that pings all backends.
-func (b *Balancer) healthChecker() {
+// startHealthChecks launches one probe goroutine per unique backend.
+func (b *Balancer) startHealthChecks(cfg *config.Config) {
+	jobs := make(map[string]*hcJob)
+
+	for name, grpCfg := range cfg.Groups {
+		for _, be := range cfg.GroupBackends(name) {
+			job := jobs[be.ID]
+			if job == nil {
+				job = &hcJob{id: be.ID, url: be.BaseURL}
+				jobs[be.ID] = job
+			}
+			if job.interval == 0 {
+				job.interval = time.Duration(grpCfg.HealthCheck.IntervalSeconds) * time.Second
+			}
+			if job.timeout == 0 {
+				job.timeout = time.Duration(grpCfg.HealthCheck.TimeoutSeconds) * time.Second
+			}
+			if job.path == "" {
+				job.path = grpCfg.HealthCheck.Path
+			}
+		}
+	}
+
+	for _, job := range jobs {
+		b.wg.Add(1)
+		go b.runHealthCheck(job)
+	}
+}
+
+// runHealthCheck probes one backend on a timer.
+func (b *Balancer) runHealthCheck(job *hcJob) {
 	defer b.wg.Done()
-	ticker := time.NewTicker(10 * time.Second)
+
+	probeURL := job.url + job.path
+	interval := job.interval
+	if interval == 0 {
+		interval = 10 * time.Second
+	}
+	timeout := job.timeout
+	if timeout == 0 {
+		timeout = 2 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-b.done:
 			return
 		case <-ticker.C:
-			b.checkAll()
+			status, err := b.hc.probe(probeURL, timeout)
+			if err != nil || status != http.StatusOK {
+				job.failures++
+				b.markUnhealthy(job.id, job.failures)
+			} else {
+				job.failures = 0
+				b.markHealthy(job.id)
+			}
 		}
 	}
 }
 
-func (b *Balancer) checkAll() {
-	// Phase 1: stub — mark all healthy.
-	// Phase 2: actual HTTP probe per backend.
+func (b *Balancer) markHealthy(id string) {
 	for _, grp := range b.groups {
-		for _, st := range grp.States {
+		if st, ok := grp.States[id]; ok {
 			st.Healthy = true
+			st.ConsecutiveFailures = 0
 			st.LastHealthCheck = time.Now()
 		}
+	}
+}
+
+func (b *Balancer) markUnhealthy(id string, failures int) {
+	for _, grp := range b.groups {
+		st, ok := grp.States[id]
+		if !ok {
+			continue
+		}
+		st.ConsecutiveFailures = failures
+		threshold := grp.Cfg.HealthCheck.UnhealthyAfter
+		if threshold == 0 {
+			threshold = 3
+		}
+		if failures >= threshold {
+			st.Healthy = false
+		}
+		st.LastHealthCheck = time.Now()
 	}
 }

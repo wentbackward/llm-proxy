@@ -38,6 +38,7 @@ type ServerConfig struct {
 	AllowPlaintext      bool            `yaml:"allow_plaintext"`      // required to start without TLS; appropriate only on Tailscale/private networks
 	TLS                 TLSConfig       `yaml:"tls"`
 	Transport           TransportConfig `yaml:"transport"`
+	DropEmptyContent    bool            `yaml:"drop_empty_content"` // globally strip nil/empty-content messages; default false
 }
 
 type PrometheusConfig struct {
@@ -96,18 +97,19 @@ func (p *PortRange) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type Backend struct {
-	ID             string    `yaml:"id"`
-	Type           string    `yaml:"type"` // openai | anthropic | ollama
-	BaseURL        string    `yaml:"base_url"`
-	APIKey         string    `yaml:"api_key"`
-	AuthType       string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
-	Group          string    `yaml:"group"`     // optional; LB group name
-	TimeoutSeconds int       `yaml:"timeout_seconds"`
-	MaxConcurrency int       `yaml:"max_concurrency"` // 0 = unlimited; limits in-flight requests to this backend
-	SkipProbe      bool      `yaml:"skip_probe"`      // skip /v1/models health check at startup/SIGHUP
-	Default        bool      `yaml:"default"`         // target for passthrough_unrouted and /v1/models; at most one backend may set this
-	Ports          PortRange `yaml:"ports"`           // expand this backend into one per port; use {port} in id and base_url
-	Headers        HeadersOp `yaml:"headers"`         // outbound header manipulation applied to every request to this backend
+	ID               string    `yaml:"id"`
+	Type             string    `yaml:"type"` // openai | anthropic | ollama
+	BaseURL          string    `yaml:"base_url"`
+	APIKey           string    `yaml:"api_key"`
+	AuthType         string    `yaml:"auth_type"` // bearer | x-api-key | "" (auto: bearer for openai, x-api-key for anthropic)
+	Group            string    `yaml:"group"`     // optional; LB group name
+	TimeoutSeconds   int       `yaml:"timeout_seconds"`
+	MaxConcurrency   int       `yaml:"max_concurrency"`    // 0 = unlimited; limits in-flight requests to this backend
+	SkipProbe        bool      `yaml:"skip_probe"`         // skip /v1/models health check at startup/SIGHUP
+	Default          bool      `yaml:"default"`            // target for passthrough_unrouted and /v1/models; at most one backend may set this
+	Ports            PortRange `yaml:"ports"`              // expand this backend into one per port; use {port} in id and base_url
+	Headers          HeadersOp `yaml:"headers"`            // outbound header manipulation applied to every request to this backend
+	DropEmptyContent *bool     `yaml:"drop_empty_content"` // override global; nil = inherit
 }
 
 type AutoRoute struct {
@@ -149,17 +151,18 @@ func (h HeadersOp) IsZero() bool {
 }
 
 type Route struct {
-	VirtualModel  string                 `yaml:"virtual_model"`
-	Backend       string                 `yaml:"backend"`
-	BackendGroup  string                 `yaml:"backend_group"` // LB group reference; mutually exclusive with backend:
-	RealModel     string                 `yaml:"real_model"`
-	ContextLength int                    `yaml:"context_length"` // overrides upstream value in /v1/models; 0 = pass through
-	Defaults      map[string]interface{} `yaml:"defaults"`
-	Clamp         map[string]interface{} `yaml:"clamp"`
-	AutoRoute     *AutoRoute             `yaml:"auto_route"`
-	SystemPrompt  SystemPromptOp         `yaml:"system_prompt"` // optional pre-send mutation of the system prompt
-	Inject        map[string]interface{} `yaml:"inject"`        // deep-merged into the body before send; route wins per leaf key
-	Headers       HeadersOp              `yaml:"headers"`       // outbound header manipulation applied after backend.Headers (route wins on conflict)
+	VirtualModel     string                 `yaml:"virtual_model"`
+	Backend          string                 `yaml:"backend"`
+	BackendGroup     string                 `yaml:"backend_group"` // LB group reference; mutually exclusive with backend:
+	RealModel        string                 `yaml:"real_model"`
+	ContextLength    int                    `yaml:"context_length"` // overrides upstream value in /v1/models; 0 = pass through
+	Defaults         map[string]interface{} `yaml:"defaults"`
+	Clamp            map[string]interface{} `yaml:"clamp"`
+	AutoRoute        *AutoRoute             `yaml:"auto_route"`
+	SystemPrompt     SystemPromptOp         `yaml:"system_prompt"`      // optional pre-send mutation of the system prompt
+	Inject           map[string]interface{} `yaml:"inject"`             // deep-merged into the body before send; route wins per leaf key
+	Headers          HeadersOp              `yaml:"headers"`            // outbound header manipulation applied after backend.Headers (route wins on conflict)
+	DropEmptyContent *bool                  `yaml:"drop_empty_content"` // override backend/global; nil = inherit
 }
 
 type JournalConfig struct {
@@ -317,10 +320,10 @@ func applyDefaults(cfg *Config) {
 			g.Strategy = "sticky_least_loaded"
 		}
 		if g.Affinity.Key == "" {
-			g.Affinity.Key = "canonical_prefix"
+			g.Affinity.Key = "first_user_message"
 		}
-		if g.Affinity.PrefixBytes == 0 {
-			g.Affinity.PrefixBytes = 1024
+		if g.Affinity.MaxContentBytes == 0 {
+			g.Affinity.MaxContentBytes = 2048
 		}
 		if g.Affinity.TTLSeconds == 0 {
 			g.Affinity.TTLSeconds = 3600
@@ -522,4 +525,20 @@ func (c *Config) GroupBackends(group string) []*Backend {
 		}
 	}
 	return out
+}
+
+// ShouldDropEmptyContent resolves the cascading toggle for stripping empty
+// messages. Priority: route > backend > global. A nil pointer means "inherit";
+// an explicit boolean overrides the parent level.
+func (c *Config) ShouldDropEmptyContent(route *Route, backend *Backend) bool {
+	// Route wins
+	if route != nil && route.DropEmptyContent != nil {
+		return *route.DropEmptyContent
+	}
+	// Backend wins
+	if backend != nil && backend.DropEmptyContent != nil {
+		return *backend.DropEmptyContent
+	}
+	// Global default
+	return c.Server.DropEmptyContent
 }

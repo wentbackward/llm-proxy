@@ -10,10 +10,10 @@ type GroupConfig struct {
 
 // AffinityConfig controls prefix-cache affinity within a group.
 type AffinityConfig struct {
-	Key         string `yaml:"key"`          // canonical_prefix | header:NAME | none
-	PrefixBytes int    `yaml:"prefix_bytes"` // default: 1024
-	TTLSeconds  int    `yaml:"ttl_seconds"`  // default: 3600
-	MaxEntries  int    `yaml:"max_entries"`  // default: 10000
+	Key             string `yaml:"key"`               // first_user_message | header:NAME | none
+	MaxContentBytes int    `yaml:"max_content_bytes"` // default: 2048
+	TTLSeconds      int    `yaml:"ttl_seconds"`       // default: 3600
+	MaxEntries      int    `yaml:"max_entries"`       // default: 10000
 }
 
 // OverloadConfig defines thresholds for backing off from a busy backend.

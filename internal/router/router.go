@@ -21,6 +21,7 @@ var samplingKeys = map[string]bool{
 // name to send upstream, and the merged sampling parameters.
 type Resolution struct {
 	Backend   *config.Backend
+	Route     *config.Route // source route; nil for passthrough
 	RealModel string
 	// Params contains only sampling parameters — callers must merge these
 	// back into the request body themselves.
@@ -104,6 +105,7 @@ func (r *Router) resolve(modelName string, body map[string]interface{}, depth in
 
 	return &Resolution{
 		Backend:      backend,
+		Route:        route,
 		RealModel:    realModel,
 		Params:       params,
 		SystemPrompt: route.SystemPrompt,

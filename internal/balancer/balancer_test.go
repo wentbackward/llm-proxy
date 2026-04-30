@@ -17,10 +17,10 @@ func testConfigWithGroup(t *testing.T) *config.Config {
 			"g1": {
 				Strategy: "sticky_least_loaded",
 				Affinity: config.AffinityConfig{
-					Key:         "canonical_prefix",
-					PrefixBytes: 1024,
-					TTLSeconds:  3600,
-					MaxEntries:  10000,
+					Key:             "first_user_message",
+					MaxContentBytes: 2048,
+					TTLSeconds:      3600,
+					MaxEntries:      10000,
 				},
 				Overload: config.OverloadConfig{
 					MaxConcurrency:     4,

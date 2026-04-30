@@ -338,12 +338,6 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	}
 	logger.Body("[%s] %s %s body: %s", rid, r.Method, r.URL.Path, string(preview))
 
-	// ── Sanitize messages: normalize null content to empty string ──────────
-	// Some clients (OpenClaw) send assistant messages with content: null when
-	// the assistant makes tool_calls but produces no text. Most vendors accept
-	// this, but some (Together AI) reject it. Normalize to empty string.
-	sanitizeMessages(rid, body)
-
 	// ── Detect protocol ────────────────────────────────────────────────────
 	protocol := opts.protocol
 	if protocol == "" {
@@ -405,8 +399,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			switch grpCfg.Affinity.Key {
 			case "none":
 				// no affinity
-			case "canonical_prefix":
-				affKey = balancer.AffinityKey(body, grpCfg.Affinity.PrefixBytes)
+			case "first_user_message":
+				affKey = balancer.FirstUserMessageKey(body, grpCfg.Affinity.MaxContentBytes)
 			default:
 				// header:NAME
 				headerName := strings.TrimPrefix(grpCfg.Affinity.Key, "header:")
@@ -444,6 +438,17 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	}
 
 	body["model"] = realModel
+
+	// ── Drop empty messages ────────────────────────────────────────────────
+	// Some clients (OpenClaw) send assistant messages with content: null when
+	// the assistant makes tool_calls but produces no text. Dropping these
+	// prevents upstream rejection from vendors like Together AI.
+	// Toggle cascade: route > backend > global (default false).
+	var route *config.Route
+	if res != nil {
+		route = res.Route
+	}
+	dropEmptyMessages(cfg, route, backend, rid, body)
 
 	// ── L2: log transformation summary ─────────────────────────────────────
 	authType := "none"
@@ -1103,31 +1108,66 @@ func deepMergeInto(dst, src map[string]interface{}) {
 	}
 }
 
-// sanitizeMessages normalizes null content to empty string in the messages array.
-// Some clients send assistant messages with content: null when the assistant
-// makes tool_calls but produces no text. Most vendors accept this, but some
-// (Together AI) reject it. Normalize to empty string.
-func sanitizeMessages(rid string, body map[string]interface{}) {
+// dropEmptyMessages removes messages with nil or empty content from the
+// messages array. Some clients (OpenClaw) send assistant messages with
+// content: null when the assistant makes tool_calls but produces no text.
+// Rather than normalizing to "" (which Together et al. reject), we drop
+// the message entirely when the toggle is enabled.
+func dropEmptyMessages(cfg *config.Config, route *config.Route, backend *config.Backend, rid string, body map[string]interface{}) {
+	if !cfg.ShouldDropEmptyContent(route, backend) {
+		return
+	}
+
 	msgs, ok := body["messages"].([]interface{})
 	if !ok {
 		return
 	}
-	var sanitized []int
-	for i := range msgs {
-		m, ok := msgs[i].(map[string]interface{})
+
+	filtered := make([]interface{}, 0, len(msgs))
+	var dropped []int
+	for i, raw := range msgs {
+		m, ok := raw.(map[string]interface{})
 		if !ok {
+			filtered = append(filtered, raw)
 			continue
 		}
-		if m["content"] == nil {
-			m["content"] = ""
-			sanitized = append(sanitized, i)
+		if isEmptyContent(m["content"]) {
+			dropped = append(dropped, i)
+			continue
 		}
+		filtered = append(filtered, m)
 	}
-	if len(sanitized) == 0 {
+
+	if len(dropped) == 0 {
 		return
 	}
-	logger.Request("[%s] normalized %d message(s) with null content to empty string", rid, len(sanitized))
-	logger.Headers("[%s]   affected indices: %v", rid, sanitized)
+	body["messages"] = filtered
+	logger.Request("[%s] dropped %d message(s) with empty content", rid, len(dropped))
+	logger.Headers("[%s]   dropped indices: %v", rid, dropped)
+}
+
+// isEmptyContent checks whether a message's content field is effectively empty.
+// Handles nil, empty string, whitespace-only string, and array-of-parts
+// (multimodal) where all parts have empty text.
+func isEmptyContent(content interface{}) bool {
+	switch v := content.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []interface{}:
+		// Multimodal: check each text part
+		for _, part := range v {
+			if p, ok := part.(map[string]interface{}); ok && p["type"] == "text" {
+				if txt, ok := p["content"].(string); ok && strings.TrimSpace(txt) != "" {
+					return false
+				}
+			}
+		}
+		return true // all text parts are empty
+	default:
+		return false
+	}
 }
 
 func detectProtocol(r *http.Request) string {

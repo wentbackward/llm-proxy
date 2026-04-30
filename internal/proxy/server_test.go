@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/wentbackward/hikyaku/internal/config"
+	"github.com/wentbackward/hikyaku/internal/router"
 	"github.com/wentbackward/hikyaku/internal/telemetry"
 )
 
@@ -1281,5 +1282,234 @@ func sendChat(t *testing.T, s *Server, model string, wantStatus int) {
 	s.handleProxy(rec, req)
 	if rec.Code != wantStatus {
 		t.Errorf("model %q: got status %d, want %d; body: %s", model, rec.Code, wantStatus, rec.Body.String())
+	}
+}
+
+func TestIsEmptyContent_Nil(t *testing.T) {
+	if !isEmptyContent(nil) {
+		t.Error("nil content should be empty")
+	}
+}
+
+func TestIsEmptyContent_EmptyString(t *testing.T) {
+	if !isEmptyContent("") {
+		t.Error("empty string should be empty")
+	}
+}
+
+func TestIsEmptyContent_WhitespaceOnly(t *testing.T) {
+	if !isEmptyContent("   \n\t  ") {
+		t.Error("whitespace-only string should be empty")
+	}
+}
+
+func TestIsEmptyContent_NonEmptyString(t *testing.T) {
+	if isEmptyContent("hello") {
+		t.Error("non-empty string should not be empty")
+	}
+}
+
+func TestIsEmptyContent_MultimodalAllEmpty(t *testing.T) {
+	content := []interface{}{
+		map[string]interface{}{"type": "text", "content": ""},
+		map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "data:..."}},
+	}
+	if !isEmptyContent(content) {
+		t.Error("all-empty text parts should be empty")
+	}
+}
+
+func TestIsEmptyContent_MultimodalHasText(t *testing.T) {
+	content := []interface{}{
+		map[string]interface{}{"type": "text", "content": "describe this image"},
+		map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "data:..."}},
+	}
+	if isEmptyContent(content) {
+		t.Error("non-empty text part should not be empty")
+	}
+}
+
+func TestDropEmptyMessages_Disabled(t *testing.T) {
+	cfg := &config.Config{}
+	body := map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hi"},
+			map[string]interface{}{"role": "assistant", "content": nil},
+		},
+	}
+	dropEmptyMessages(cfg, nil, nil, "test", body)
+	msgs := body["messages"].([]interface{})
+	if len(msgs) != 2 {
+		t.Errorf("disabled: expected 2 messages, got %d", len(msgs))
+	}
+}
+
+func TestDropEmptyMessages_RemovesNil(t *testing.T) {
+	trueVal := true
+	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: trueVal}}
+	body := map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hi"},
+			map[string]interface{}{"role": "assistant", "content": nil},
+			map[string]interface{}{"role": "user", "content": "follow up"},
+		},
+	}
+	dropEmptyMessages(cfg, nil, nil, "test", body)
+	msgs := body["messages"].([]interface{})
+	if len(msgs) != 2 {
+		t.Errorf("expected 2 messages after dropping nil, got %d", len(msgs))
+	}
+}
+
+func TestDropEmptyMessages_RemovesEmptyString(t *testing.T) {
+	trueVal := true
+	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: trueVal}}
+	body := map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hi"},
+			map[string]interface{}{"role": "assistant", "content": ""},
+			map[string]interface{}{"role": "user", "content": "again"},
+		},
+	}
+	dropEmptyMessages(cfg, nil, nil, "test", body)
+	msgs := body["messages"].([]interface{})
+	if len(msgs) != 2 {
+		t.Errorf("expected 2 messages after dropping empty string, got %d", len(msgs))
+	}
+}
+
+func TestDropEmptyMessages_Integration_GlobalEnabled(t *testing.T) {
+	var capReq capturedRequest
+	_, backend := newTestServer(t, &capReq)
+	defer backend.Close()
+
+	trueVal := true
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			APIKey:              "test",
+			PassthroughUnrouted: true,
+			DropEmptyContent:    trueVal,
+		},
+		Backends: []config.Backend{
+			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1"},
+		},
+	}
+	metrics, _, _ := telemetry.Init()
+	srv := New("test", "inspect", cfg, metrics, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": "any",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hi"},
+			map[string]interface{}{"role": "assistant", "content": nil},
+			map[string]interface{}{"role": "assistant", "content": ""},
+			map[string]interface{}{"role": "user", "content": "follow up"},
+		},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test")
+	rec := httptest.NewRecorder()
+	srv.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	msgs := capReq.Body["messages"].([]interface{})
+	if len(msgs) != 2 {
+		t.Errorf("expected 2 messages (empties dropped), got %d", len(msgs))
+	}
+}
+
+func TestDropEmptyMessages_Integration_RouteOverrides(t *testing.T) {
+	_, backend := newTestServer(t, nil)
+	defer backend.Close()
+
+	yamlContent := fmt.Sprintf(`
+server:
+  api_key: test
+  drop_empty_content: true
+backends:
+  - id: test
+    type: openai
+    base_url: "%s/v1"
+routes:
+  - virtual_model: my-model
+    backend: test
+    drop_empty_content: false
+`, backend.URL)
+
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(tmpFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	metrics, _, _ := telemetry.Init()
+	srv := New("test", "inspect", cfg, metrics, nil)
+
+	var captured map[string]interface{}
+	backend.Close()
+	backend = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &captured)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "chatcmpl-test", "object": "chat.completion",
+			"choices": []interface{}{
+				map[string]interface{}{"index": 0, "finish_reason": "stop",
+					"message": map[string]interface{}{"role": "assistant", "content": "ok"}},
+			},
+		})
+	}))
+
+	// Reload config with new backend URL
+	yamlContent = fmt.Sprintf(`
+server:
+  api_key: test
+  drop_empty_content: true
+backends:
+  - id: test
+    type: openai
+    base_url: "%s/v1"
+routes:
+  - virtual_model: my-model
+    backend: test
+    drop_empty_content: false
+`, backend.URL)
+	cfg, err = config.Load(filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil {
+		// reload from fresh file
+		os.WriteFile(tmpFile, []byte(yamlContent), 0o644)
+		cfg, err = config.Load(tmpFile)
+		if err != nil {
+			t.Fatalf("reload config: %v", err)
+		}
+	}
+	srv.cfg.Store(cfg)
+	srv.rtr.Store(router.New(cfg))
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": "my-model",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hi"},
+			map[string]interface{}{"role": "assistant", "content": nil},
+		},
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test")
+	rec := httptest.NewRecorder()
+	srv.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	msgs := captured["messages"].([]interface{})
+	if len(msgs) != 2 {
+		t.Errorf("route override disabled dropping: expected 2 messages kept, got %d", len(msgs))
 	}
 }
