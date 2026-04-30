@@ -1,11 +1,28 @@
-# hikyaku
+# hikyaku 飞脚
+![Hikyaku](assets/hiyaku-main.png "_Hikyaku - 飞脚 - Flying Feet - were specialized, high-speed couriers in Edo-period Japan (17th–19th century) who delivered mail, money, and cargo across the country, often covering 500 km between Osaka and Edo in just 3–6 days. They worked in relays, wearing minimal gear to move quickly over treacherous terrain. The perfect analogy for the lightweight, high-performance system, you trust to delivery yor inference messages_")
 
 [![CI](https://github.com/wentbackward/hikyaku/actions/workflows/ci.yml/badge.svg)](https://github.com/wentbackward/hikyaku/actions/workflows/ci.yml)
 [![Release](https://github.com/wentbackward/hikyaku/actions/workflows/release.yml/badge.svg)](https://github.com/wentbackward/hikyaku/actions/workflows/release.yml)
-[![Docker](https://img.shields.io/badge/ghcr.io-wentbackward%2Fllm--proxy-blue?logo=docker)](https://github.com/wentbackward/hikyaku/pkgs/container/hikyaku)
+[![Docker](https://img.shields.io/badge/ghcr.io-wentbackward%2Fhikyaku-blue?logo=docker)](https://github.com/wentbackward/hikyaku/pkgs/container/hikyaku)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wentbackward/hikyaku)](https://goreportcard.com/report/github.com/wentbackward/hikyaku)
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+## Hikyaku - the conduit for intelligence
+
+An enterprise grade, highly performant route virtualizer for your infrerence workloads. Written in Golang for speed, concurrency and efficient resource usage, Hikyaku is the reliable messaging layer between your agentic workers and the AI inference layers you have deployed.
+
+## Enterprise Grade Features Built in
+
+|   |   |
+| --- | --- |
+| **Simplify** and connect your agentic process designers and software engineers to the models they need | **Manage** inference backends across any disparate landscape of providers, local or in the cloud |
+| **Smart** load-balancing increases concurrent throughput and ensures maximum benefit of KV cache utlization | **Save** time and money |
+| **Reliable** low latency and highly available |  **Curate and Control** approved models |
+| **Protect** your API keys, control access |  **Inspect** and debug messages to speed up analysis and problem solving |
+| **Set** and **clamp** sampling parameters to ensure optimal model performance | Deploy **defenders** like loop detector and supress 'zero' messages before they waste valuable tokens |
+
+## Virtualize
 
 Virtualize models from any provider — local or cloud — and switch between them in your client UI.
 
