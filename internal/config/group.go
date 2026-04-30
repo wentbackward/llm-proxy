@@ -2,11 +2,12 @@ package config
 
 // GroupConfig defines load-balancing behavior for a named group of backends.
 type GroupConfig struct {
-	Strategy      string              `yaml:"strategy"` // sticky_least_loaded | least_loaded | round_robin | single
-	Affinity      AffinityConfig      `yaml:"affinity"`
-	Overload      OverloadConfig      `yaml:"overload"`
-	HealthCheck   HealthCheckConfig   `yaml:"health_check"`
-	MetricsScrape MetricsScrapeConfig `yaml:"metrics_scrape"`
+	Strategy      string                 `yaml:"strategy"` // sticky_least_loaded | least_loaded | round_robin | single
+	Affinity      AffinityConfig         `yaml:"affinity"`
+	Overload      OverloadConfig         `yaml:"overload"`
+	HealthCheck   HealthCheckConfig      `yaml:"health_check"`
+	MetricsScrape MetricsScrapeConfig    `yaml:"metrics_scrape"`
+	Monitoring    *GroupMonitoringConfig `yaml:"monitoring"`
 }
 
 // AffinityConfig controls prefix-cache affinity within a group.
@@ -38,6 +39,14 @@ type MetricsScrapeConfig struct {
 	IntervalSeconds       int    `yaml:"interval_seconds"`        // default: 5
 	Path                  string `yaml:"path"`                    // default: /metrics
 	StaleThresholdSeconds int    `yaml:"stale_threshold_seconds"` // default: 30
+}
+
+// GroupMonitoringConfig allows per-group override of monitoring settings.
+type GroupMonitoringConfig struct {
+	Alive        *AliveConfig        `yaml:"alive"`
+	Metrics      *MetricsConfig      `yaml:"metrics"`
+	FlowTracking *FlowTrackingConfig `yaml:"flow_tracking"`
+	Recovery     *RecoveryConfig     `yaml:"recovery"`
 }
 
 // GetStaleThreshold returns the stale threshold in seconds for a group.

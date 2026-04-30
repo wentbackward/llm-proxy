@@ -7,9 +7,9 @@ import (
 
 func TestPickLeastLoaded_LowestInFlight(t *testing.T) {
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
-		NewBackendState("c", "http://c", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
+		NewBackendState("c", "http://c", 1, 300),
 	}
 	pool[0].InFlight.Add(5)
 	pool[1].InFlight.Add(1)
@@ -22,8 +22,8 @@ func TestPickLeastLoaded_LowestInFlight(t *testing.T) {
 
 func TestPickLeastLoaded_WeightBias(t *testing.T) {
 	pool := []*BackendState{
-		NewBackendState("heavy", "http://heavy", 2), // weight 2 → half effective load
-		NewBackendState("light", "http://light", 1),
+		NewBackendState("heavy", "http://heavy", 2, 300), // weight 2 → half effective load
+		NewBackendState("light", "http://light", 1, 300),
 	}
 	pool[0].InFlight.Add(2) // effective: 2/2 = 1.0
 	pool[1].InFlight.Add(1) // effective: 1/1 = 1.0
@@ -36,7 +36,7 @@ func TestPickLeastLoaded_WeightBias(t *testing.T) {
 }
 
 func TestIsOverloaded_InFlightExceeds(t *testing.T) {
-	b := NewBackendState("a", "http://a", 1)
+	b := NewBackendState("a", "http://a", 1, 300)
 	b.InFlight.Add(4)
 	if !isOverloaded(b, 4, 0, 30*time.Second) {
 		t.Error("should be overloaded at max_concurrency boundary")
@@ -44,7 +44,7 @@ func TestIsOverloaded_InFlightExceeds(t *testing.T) {
 }
 
 func TestIsOverloaded_UnderLimit(t *testing.T) {
-	b := NewBackendState("a", "http://a", 1)
+	b := NewBackendState("a", "http://a", 1, 300)
 	b.InFlight.Add(2)
 	if isOverloaded(b, 4, 0, 30*time.Second) {
 		t.Error("should not be overloaded under limit")
@@ -52,7 +52,7 @@ func TestIsOverloaded_UnderLimit(t *testing.T) {
 }
 
 func TestIsOverloaded_ZeroMaxConcurrencyMeansUnlimited(t *testing.T) {
-	b := NewBackendState("a", "http://a", 1)
+	b := NewBackendState("a", "http://a", 1, 300)
 	b.InFlight.Add(100)
 	if isOverloaded(b, 0, 0, 30*time.Second) {
 		t.Error("max_concurrency=0 means unlimited")

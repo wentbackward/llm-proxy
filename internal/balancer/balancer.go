@@ -15,6 +15,7 @@ import (
 type Balancer struct {
 	groups map[string]*Group
 	hc     *hcClient
+	ac     *aliveChecker
 	done   chan struct{}
 	wg     sync.WaitGroup
 }
@@ -48,18 +49,30 @@ type healthJob struct {
 	failures int
 }
 
+// aliveJob describes one alive-check probe target.
+type aliveJob struct {
+	id             string
+	url            string
+	interval       time.Duration
+	unhealthyAfter int
+	probes         []config.AliveProbe
+	failures       int
+}
+
 // New creates a Balancer from the config and starts background goroutines.
 func New(cfg *config.Config) *Balancer {
 	b := &Balancer{
 		groups: make(map[string]*Group, len(cfg.Groups)),
 		hc:     newHCClient(cfg),
+		ac:     newAliveChecker(),
 		done:   make(chan struct{}),
 	}
 
 	for name, grpCfg := range cfg.Groups {
 		states := make(map[string]*BackendState, len(cfg.Backends))
 		for _, be := range cfg.GroupBackends(name) {
-			states[be.ID] = NewBackendState(be.ID, be.BaseURL, 1)
+			windowSec := cfg.GetFlowWindowDuration(grpCfg)
+			states[be.ID] = NewBackendState(be.ID, be.BaseURL, 1, windowSec)
 		}
 
 		var selector Selector
@@ -140,9 +153,7 @@ func (b *Balancer) Stop() {
 }
 
 // startMonitoring launches monitoring goroutines for all backends.
-// For each backend, decides whether to use metrics scraping or health-only probing.
 func (b *Balancer) startMonitoring(cfg *config.Config) {
-	// Collect unique backends with their group configs
 	type backendInfo struct {
 		id     string
 		url    string
@@ -162,7 +173,6 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 	}
 
 	for _, info := range backendMap {
-		// Pick the first group config that has metrics scraping enabled
 		var scrapeCfg *config.GroupConfig
 		healthCfg := info.groups[0]
 
@@ -174,13 +184,11 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 		}
 
 		if scrapeCfg != nil {
-			// Probe /metrics at startup to see if it's available
 			scrapeURL := info.url + scrapeCfg.GetScrapePath()
 			timeout := 3 * time.Second
 			body, err := b.hc.scrapeMetrics(scrapeURL, timeout)
 
 			if err == nil && len(body) > 0 {
-				// Metrics available — launch scrape+health loop
 				job := &scrapeJob{
 					id:             info.id,
 					url:            info.url,
@@ -198,7 +206,7 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 			}
 		}
 
-		// Metrics not available or not enabled — launch health-only loop
+		// Metrics not available - launch health-only loop
 		job := &healthJob{
 			id:       info.id,
 			url:      info.url,
@@ -214,6 +222,85 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 		}
 		b.wg.Add(1)
 		go b.runHealthCheck(job)
+	}
+
+	// Start alive checker for all backends
+	b.startAliveChecks(cfg)
+}
+
+// startAliveChecks launches alive check goroutines for all backends.
+func (b *Balancer) startAliveChecks(cfg *config.Config) {
+	type backendInfo struct {
+		id     string
+		url    string
+		groups []*config.GroupConfig
+	}
+	backendMap := make(map[string]*backendInfo)
+
+	for name, grpCfg := range cfg.Groups {
+		for _, be := range cfg.GroupBackends(name) {
+			info, exists := backendMap[be.ID]
+			if !exists {
+				info = &backendInfo{id: be.ID, url: be.BaseURL}
+				backendMap[be.ID] = info
+			}
+			info.groups = append(info.groups, grpCfg)
+		}
+	}
+
+	for _, info := range backendMap {
+		aliveCfg := cfg.GetAliveConfig(info.groups[0])
+		job := &aliveJob{
+			id:             info.id,
+			url:            info.url,
+			interval:       time.Duration(aliveCfg.IntervalSeconds) * time.Second,
+			unhealthyAfter: aliveCfg.UnhealthyAfter,
+			probes:         aliveCfg.Probes,
+		}
+		if job.interval == 0 {
+			job.interval = 60 * time.Second
+		}
+		if job.unhealthyAfter == 0 {
+			job.unhealthyAfter = 3
+		}
+		b.wg.Add(1)
+		go b.runAliveCheck(job)
+	}
+}
+
+// runAliveCheck performs periodic OR-based alive checks.
+func (b *Balancer) runAliveCheck(job *aliveJob) {
+	defer b.wg.Done()
+
+	// Check immediately on startup
+	if len(job.probes) > 0 {
+		if alive := b.ac.checkAlive(job.url, job.probes); !alive {
+			job.failures++
+			b.markUnhealthy(job.id, job.failures)
+		} else {
+			job.failures = 0
+			b.markHealthy(job.id)
+		}
+	}
+
+	ticker := time.NewTicker(job.interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-ticker.C:
+			if len(job.probes) > 0 {
+				if alive := b.ac.checkAlive(job.url, job.probes); !alive {
+					job.failures++
+					b.markUnhealthy(job.id, job.failures)
+				} else {
+					job.failures = 0
+					b.markHealthy(job.id)
+				}
+			}
+		}
 	}
 }
 
@@ -246,16 +333,11 @@ func (b *Balancer) doScrape(job *scrapeJob) {
 		return
 	}
 
-	// Parse metrics
 	result := parsePrometheusMetrics(strings.NewReader(string(body)), job.engine)
 
 	if !result.Parsed {
-		// Got 200 but couldn't parse any known metrics — still healthy,
-		// just no useful data. Could happen with a reverse proxy that serves
-		// /metrics but isn't vLLM/SGLang.
 		job.failures = 0
 		b.markHealthy(job.id)
-		// Update state with empty metrics (marks them available but zero)
 		b.updateMetrics(job.id, false, 0, 0, 0)
 		return
 	}
@@ -328,4 +410,34 @@ func (b *Balancer) updateMetrics(id string, available bool, running, waiting int
 			st.UpdateMetrics(available, running, waiting, kvCachePct)
 		}
 	}
+}
+
+// Dispatch records that a request was sent to this backend.
+func (b *Balancer) Dispatch(backendID string) {
+	for _, grp := range b.groups {
+		if st, ok := grp.States[backendID]; ok {
+			if st.Flow != nil {
+				st.Flow.Dispatch()
+			}
+			return
+		}
+	}
+}
+
+// Complete records that a request completed.
+func (b *Balancer) Complete(backendID string, success, timedOut bool, ttftMs float64) {
+	for _, grp := range b.groups {
+		if st, ok := grp.States[backendID]; ok {
+			if st.Flow != nil {
+				st.Flow.Complete(success, timedOut, ttftMs)
+			}
+			return
+		}
+	}
+}
+
+// CompleteAndDecr completes a request and decrements the in-flight counter.
+func (b *Balancer) CompleteAndDecr(backendID string, success, timedOut bool, ttftMs float64) {
+	b.Complete(backendID, success, timedOut, ttftMs)
+	b.Decr(backendID)
 }

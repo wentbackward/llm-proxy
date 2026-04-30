@@ -7,8 +7,8 @@ import (
 func TestSingleSelector(t *testing.T) {
 	sel := singleSelector{}
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 	chosen, err := sel.Select(pool, "", nil)
 	if err != nil {
@@ -22,8 +22,8 @@ func TestSingleSelector(t *testing.T) {
 func TestRoundRobinSelector(t *testing.T) {
 	sel := &roundRobinSelector{}
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 	order := []string{}
 	for i := 0; i < 6; i++ {
@@ -44,8 +44,8 @@ func TestRoundRobinSelector(t *testing.T) {
 func TestLeastLoadedSelector(t *testing.T) {
 	sel := leastLoadedSelector{}
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 	pool[0].InFlight.Add(10)
 	chosen, err := sel.Select(pool, "", nil)

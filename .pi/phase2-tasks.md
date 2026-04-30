@@ -24,10 +24,10 @@ Background metrics scraping from backend `/metrics` endpoints (vLLM/SGLang Prome
 
 ## Tasks
 
-- [ ] Step 1: Add metrics_scrape config to GroupConfig
-- [ ] Step 2: Extend BackendState with scraped metrics fields
-- [ ] Step 3: Implement Prometheus parser (vLLM + SGLang)
-- [ ] Step 4: Integrate scraper into balancer (startup probe + background loop)
-- [ ] Step 5: Update loadScore and isOverloaded to use scraped metrics
-- [ ] Step 6: Tests (parser + integration)
-- [ ] Step 7: make check
+- [x] Step 1: Add metrics_scrape config to GroupConfig
+- [x] Step 2: Extend BackendState with scraped metrics fields
+- [x] Step 3: Implement Prometheus parser (vLLM + SGLang)
+- [x] Step 4: Integrate scraper into balancer (startup probe + background loop)
+- [x] Step 5: Update loadScore and isOverloaded to use scraped metrics
+- [x] Step 6: Tests (parser + integration)
+- [x] Step 7: make check

@@ -28,17 +28,21 @@ type BackendState struct {
 	KVCachePct        float64
 	LastMetricsUpdate time.Time
 
+	// Flow tracking (separate mutex in FlowStats)
+	Flow *FlowStats
+
 	// Local fallback (always tracked, even when metrics are disabled)
 	InFlight atomic.Int64 // requests currently being proxied
 }
 
 // NewBackendState creates a healthy BackendState.
-func NewBackendState(id, url string, weight int) *BackendState {
+func NewBackendState(id, url string, weight, windowSeconds int) *BackendState {
 	return &BackendState{
 		ID:      id,
 		URL:     url,
 		Weight:  weight,
 		Healthy: true,
+		Flow:    NewFlowStats(windowSeconds),
 	}
 }
 

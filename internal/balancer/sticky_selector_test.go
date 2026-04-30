@@ -15,8 +15,8 @@ func TestSticky_PinsOnFirstRequest(t *testing.T) {
 	store := newTestStore(t)
 	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 
 	// First request — pins to one backend
@@ -39,8 +39,8 @@ func TestSticky_DifferentKeysDifferentBackends(t *testing.T) {
 	store := newTestStore(t)
 	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 
 	chosenA, _ := sel.Select(pool, "key-a", nil)
@@ -64,8 +64,8 @@ func TestSticky_BailsWhenOverloaded(t *testing.T) {
 	store := newTestStore(t)
 	sel := NewStickyLeastLoaded(store, 2, 0, 30*time.Second) // max 2 concurrent
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 
 	// Give "b" heavy load so "a" is deterministically picked first
@@ -101,8 +101,8 @@ func TestSticky_EmptyKeyUsesFallback(t *testing.T) {
 	store := newTestStore(t)
 	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 	pool := []*BackendState{
-		NewBackendState("a", "http://a", 1),
-		NewBackendState("b", "http://b", 1),
+		NewBackendState("a", "http://a", 1, 300),
+		NewBackendState("b", "http://b", 1, 300),
 	}
 
 	chosen, err := sel.Select(pool, "", nil)

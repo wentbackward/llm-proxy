@@ -453,6 +453,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 				backend = bk
 			}
 			s.balancer.Incr(selected.ID)
+			s.balancer.Dispatch(selected.ID)
 		} else {
 			backend = res.Backend
 		}
@@ -608,7 +609,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
 			if s.balancer != nil {
-				s.balancer.Decr(backendID)
+				s.balancer.CompleteAndDecr(backendID, false, false, 0)
 			}
 			upstreamURL := targetURL.String() + r.URL.Path
 			logger.Request("[%s] %s %s model=%s backend=%s url=%s status=502 dur=%.3fs ERROR: %v",
@@ -909,7 +910,7 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 					if s.balancer != nil {
-						s.balancer.Decr(backendID)
+						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
 					}
 					logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true",
 						rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
@@ -940,7 +941,7 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 			if s.balancer != nil {
-				s.balancer.Decr(backendID)
+				s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
 			}
 			logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs",
 				rid, path, virtualModel, realModel, backendID, statusStr, elapsed)

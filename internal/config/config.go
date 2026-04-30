@@ -187,6 +187,7 @@ type Config struct {
 	Journal           JournalConfig           `yaml:"journal"`
 	SigMessageCapture SigMessageCaptureConfig `yaml:"sig_message_capture"`
 	Defenders         DefenderConfig          `yaml:"defenders"`
+	LoadBalancing     LoadBalancingConfig     `yaml:"load_balancing"`
 	Backends          []Backend               `yaml:"backends"`
 	Routes            []Route                 `yaml:"routes"`
 	Groups            map[string]*GroupConfig `yaml:"groups"`
@@ -677,4 +678,218 @@ func (c *Config) GetZeroContentDetection(route *Route) ZeroContentDetectionConfi
 		}
 	}
 	return cfg
+}
+
+// --- Load Balancing Monitoring ---
+
+// LoadBalancingConfig holds global defaults for load balancing monitoring.
+type LoadBalancingConfig struct {
+	Alive        AliveConfig        `yaml:"alive"`
+	Metrics      MetricsConfig      `yaml:"metrics"`
+	FlowTracking FlowTrackingConfig `yaml:"flow_tracking"`
+	Recovery     RecoveryConfig     `yaml:"recovery"`
+}
+
+// AliveConfig configures the alive check probes.
+type AliveConfig struct {
+	IntervalSeconds int          `yaml:"interval_seconds"` // default: 60
+	UnhealthyAfter  int          `yaml:"unhealthy_after"`  // default: 3
+	Probes          []AliveProbe `yaml:"probes"`
+}
+
+// AliveProbe defines a single alive check probe.
+type AliveProbe struct {
+	Type           string `yaml:"type"`            // lightweight_chat | http_get
+	Path           string `yaml:"path"`            // default: /v1/chat/completions or /health
+	TimeoutSeconds int    `yaml:"timeout_seconds"` // default: 5 or 2
+}
+
+// MetricsConfig configures metrics scraping behavior.
+type MetricsConfig struct {
+	StartupRetries       int `yaml:"startup_retries"`         // default: 3
+	StartupBackoffSec    int `yaml:"startup_backoff_seconds"` // default: 5
+	RetryIntervalSec     int `yaml:"retry_interval_seconds"`  // default: 120
+	ScrapeTimeoutSeconds int `yaml:"scrape_timeout_seconds"`  // default: 3
+}
+
+// FlowTrackingConfig configures the rolling window for message flow statistics.
+type FlowTrackingConfig struct {
+	WindowMode       string  `yaml:"window_mode"`          // multiplier | fixed (default: multiplier)
+	WindowMultiplier float64 `yaml:"window_multiplier"`    // window = timeout * multiplier (default: 2.0)
+	WindowFixedSec   int     `yaml:"window_fixed_seconds"` // used when mode=fixed (default: 300)
+}
+
+// RecoveryConfig configures the graduated recovery behavior.
+type RecoveryConfig struct {
+	RetryDelaySec int `yaml:"retry_delay_seconds"` // default: 30
+	RampUpSec     int `yaml:"ramp_up_seconds"`     // default: 60
+}
+
+// GetAliveConfig resolves alive check config for a group,
+// applying the cascading resolution: per-group > global > defaults.
+func (c *Config) GetAliveConfig(group *GroupConfig) AliveConfig {
+	cfg := AliveConfig{
+		IntervalSeconds: 60,
+		UnhealthyAfter:  3,
+		Probes: []AliveProbe{
+			{Type: "lightweight_chat", Path: "/v1/chat/completions", TimeoutSeconds: 5},
+			{Type: "http_get", Path: "/health", TimeoutSeconds: 2},
+		},
+	}
+
+	// Global defaults
+	glbl := c.LoadBalancing.Alive
+	if glbl.IntervalSeconds > 0 {
+		cfg.IntervalSeconds = glbl.IntervalSeconds
+	}
+	if glbl.UnhealthyAfter > 0 {
+		cfg.UnhealthyAfter = glbl.UnhealthyAfter
+	}
+	if len(glbl.Probes) > 0 {
+		cfg.Probes = glbl.Probes
+	}
+
+	// Per-group override
+	if group != nil && group.Monitoring != nil && group.Monitoring.Alive != nil {
+		rt := group.Monitoring.Alive
+		if rt.IntervalSeconds > 0 {
+			cfg.IntervalSeconds = rt.IntervalSeconds
+		}
+		if rt.UnhealthyAfter > 0 {
+			cfg.UnhealthyAfter = rt.UnhealthyAfter
+		}
+		if len(rt.Probes) > 0 {
+			cfg.Probes = rt.Probes
+		}
+	}
+	return cfg
+}
+
+// GetMetricsConfig resolves metrics scraping config for a group,
+// applying the cascading resolution: per-group > global > defaults.
+func (c *Config) GetMetricsConfig(group *GroupConfig) MetricsConfig {
+	cfg := MetricsConfig{
+		StartupRetries:       3,
+		StartupBackoffSec:    5,
+		RetryIntervalSec:     120,
+		ScrapeTimeoutSeconds: 3,
+	}
+
+	// Global defaults
+	glbl := c.LoadBalancing.Metrics
+	if glbl.StartupRetries > 0 {
+		cfg.StartupRetries = glbl.StartupRetries
+	}
+	if glbl.StartupBackoffSec > 0 {
+		cfg.StartupBackoffSec = glbl.StartupBackoffSec
+	}
+	if glbl.RetryIntervalSec > 0 {
+		cfg.RetryIntervalSec = glbl.RetryIntervalSec
+	}
+	if glbl.ScrapeTimeoutSeconds > 0 {
+		cfg.ScrapeTimeoutSeconds = glbl.ScrapeTimeoutSeconds
+	}
+
+	// Per-group override
+	if group != nil && group.Monitoring != nil && group.Monitoring.Metrics != nil {
+		rt := group.Monitoring.Metrics
+		if rt.StartupRetries > 0 {
+			cfg.StartupRetries = rt.StartupRetries
+		}
+		if rt.StartupBackoffSec > 0 {
+			cfg.StartupBackoffSec = rt.StartupBackoffSec
+		}
+		if rt.RetryIntervalSec > 0 {
+			cfg.RetryIntervalSec = rt.RetryIntervalSec
+		}
+		if rt.ScrapeTimeoutSeconds > 0 {
+			cfg.ScrapeTimeoutSeconds = rt.ScrapeTimeoutSeconds
+		}
+	}
+	return cfg
+}
+
+// GetFlowTracking resolves flow tracking config for a group,
+// applying the cascading resolution: per-group > global > defaults.
+func (c *Config) GetFlowTracking(group *GroupConfig) FlowTrackingConfig {
+	cfg := FlowTrackingConfig{
+		WindowMode:       "multiplier",
+		WindowMultiplier: 2.0,
+		WindowFixedSec:   300,
+	}
+
+	// Global defaults
+	glbl := c.LoadBalancing.FlowTracking
+	if glbl.WindowMode != "" {
+		cfg.WindowMode = glbl.WindowMode
+	}
+	if glbl.WindowMultiplier > 0 {
+		cfg.WindowMultiplier = glbl.WindowMultiplier
+	}
+	if glbl.WindowFixedSec > 0 {
+		cfg.WindowFixedSec = glbl.WindowFixedSec
+	}
+
+	// Per-group override
+	if group != nil && group.Monitoring != nil && group.Monitoring.FlowTracking != nil {
+		rt := group.Monitoring.FlowTracking
+		if rt.WindowMode != "" {
+			cfg.WindowMode = rt.WindowMode
+		}
+		if rt.WindowMultiplier > 0 {
+			cfg.WindowMultiplier = rt.WindowMultiplier
+		}
+		if rt.WindowFixedSec > 0 {
+			cfg.WindowFixedSec = rt.WindowFixedSec
+		}
+	}
+	return cfg
+}
+
+// GetRecovery resolves recovery config for a group,
+// applying the cascading resolution: per-group > global > defaults.
+func (c *Config) GetRecovery(group *GroupConfig) RecoveryConfig {
+	cfg := RecoveryConfig{
+		RetryDelaySec: 30,
+		RampUpSec:     60,
+	}
+
+	// Global defaults
+	glbl := c.LoadBalancing.Recovery
+	if glbl.RetryDelaySec > 0 {
+		cfg.RetryDelaySec = glbl.RetryDelaySec
+	}
+	if glbl.RampUpSec > 0 {
+		cfg.RampUpSec = glbl.RampUpSec
+	}
+
+	// Per-group override
+	if group != nil && group.Monitoring != nil && group.Monitoring.Recovery != nil {
+		rt := group.Monitoring.Recovery
+		if rt.RetryDelaySec > 0 {
+			cfg.RetryDelaySec = rt.RetryDelaySec
+		}
+		if rt.RampUpSec > 0 {
+			cfg.RampUpSec = rt.RampUpSec
+		}
+	}
+	return cfg
+}
+
+// GetFlowWindowDuration returns the flow tracking window duration in seconds.
+func (c *Config) GetFlowWindowDuration(group *GroupConfig) int {
+	ft := c.GetFlowTracking(group)
+	switch ft.WindowMode {
+	case "fixed":
+		if ft.WindowFixedSec > 0 {
+			return ft.WindowFixedSec
+		}
+		return 300
+	case "multiplier":
+		// For multiplier mode, we need the request timeout to calculate
+		// Return a reasonable default; actual calculation happens at runtime
+		return int(ft.WindowMultiplier * 300) // placeholder; real calc in balancer
+	default:
+		return 300
+	}
 }
