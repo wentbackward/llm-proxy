@@ -13,7 +13,7 @@ func newTestStore(t *testing.T) AffinityStore {
 
 func TestSticky_PinsOnFirstRequest(t *testing.T) {
 	store := newTestStore(t)
-	sel := NewStickyLeastLoaded(store, 0, 0)
+	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 	pool := []*BackendState{
 		NewBackendState("a", "http://a", 1),
 		NewBackendState("b", "http://b", 1),
@@ -37,7 +37,7 @@ func TestSticky_PinsOnFirstRequest(t *testing.T) {
 
 func TestSticky_DifferentKeysDifferentBackends(t *testing.T) {
 	store := newTestStore(t)
-	sel := NewStickyLeastLoaded(store, 0, 0)
+	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 	pool := []*BackendState{
 		NewBackendState("a", "http://a", 1),
 		NewBackendState("b", "http://b", 1),
@@ -62,7 +62,7 @@ func TestSticky_DifferentKeysDifferentBackends(t *testing.T) {
 
 func TestSticky_BailsWhenOverloaded(t *testing.T) {
 	store := newTestStore(t)
-	sel := NewStickyLeastLoaded(store, 2, 0) // max 2 concurrent
+	sel := NewStickyLeastLoaded(store, 2, 0, 30*time.Second) // max 2 concurrent
 	pool := []*BackendState{
 		NewBackendState("a", "http://a", 1),
 		NewBackendState("b", "http://b", 1),
@@ -99,7 +99,7 @@ func TestSticky_BailsWhenOverloaded(t *testing.T) {
 
 func TestSticky_EmptyKeyUsesFallback(t *testing.T) {
 	store := newTestStore(t)
-	sel := NewStickyLeastLoaded(store, 0, 0)
+	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 	pool := []*BackendState{
 		NewBackendState("a", "http://a", 1),
 		NewBackendState("b", "http://b", 1),
@@ -116,7 +116,7 @@ func TestSticky_EmptyKeyUsesFallback(t *testing.T) {
 
 func TestSticky_AllPoolDown(t *testing.T) {
 	store := newTestStore(t)
-	sel := NewStickyLeastLoaded(store, 0, 0)
+	sel := NewStickyLeastLoaded(store, 0, 0, 30*time.Second)
 
 	_, err := sel.Select([]*BackendState{}, "key", nil)
 	if !errors.Is(err, ErrNoHealthyBackend) {

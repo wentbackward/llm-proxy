@@ -37,10 +37,10 @@ Per-route override: `routes[].defenders.loop_detection` / `.zero_content_detecti
 
 ## Tasks
 
-- [ ] Step 1: Add defenders config schema (global + per-route)
-- [ ] Step 2: Implement zero-content detection (validateLastUserContent + checkTotalInputSize)
-- [ ] Step 3: Implement loop detection (LoopDetector with LRU/TTL map)
-- [ ] Step 4: Wire both into proxyRequest (before routing)
-- [ ] Step 5: Add metrics + response headers
-- [ ] Step 6: Tests (unit + integration)
-- [ ] Step 7: `make check`
+- [x] Step 1: Add defenders config schema (global + per-route)
+- [x] Step 2: Implement zero-content detection (validateLastUserContent + checkTotalInputSize)
+- [x] Step 3: Implement loop detection (LoopDetector with LRU/TTL map)
+- [x] Step 4: Wire both into proxyRequest (before routing)
+- [x] Step 5: Add metrics + response headers
+- [x] Step 6: Tests (unit + integration)
+- [x] Step 7: `make check`

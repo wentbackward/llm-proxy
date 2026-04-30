@@ -1,18 +1,22 @@
 package balancer
 
+import "time"
+
 // StickyLeastLoaded pins requests to a backend by affinity key,
 // falling back to least-loaded when the pinned target is overloaded or unavailable.
 type StickyLeastLoaded struct {
 	store          AffinityStore
 	maxConcurrency int
 	kvCachePct     float64
+	staleThreshold time.Duration
 }
 
-func NewStickyLeastLoaded(store AffinityStore, maxConcurrency int, kvCachePct float64) *StickyLeastLoaded {
+func NewStickyLeastLoaded(store AffinityStore, maxConcurrency int, kvCachePct float64, staleThreshold time.Duration) *StickyLeastLoaded {
 	return &StickyLeastLoaded{
 		store:          store,
 		maxConcurrency: maxConcurrency,
 		kvCachePct:     kvCachePct,
+		staleThreshold: staleThreshold,
 	}
 }
 
@@ -21,11 +25,16 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 		return nil, ErrNoHealthyBackend
 	}
 
+	staleThreshold := s.staleThreshold
+	if ctx != nil && ctx.StaleThreshold > 0 {
+		staleThreshold = ctx.StaleThreshold
+	}
+
 	// Try affinity pin
 	if key != "" {
 		if entry, ok := s.store.Get(key); ok {
 			if pinned := findByID(pool, entry.BackendID); pinned != nil {
-				if !isOverloaded(pinned, s.maxConcurrency, s.kvCachePct) {
+				if !isOverloaded(pinned, s.maxConcurrency, s.kvCachePct, staleThreshold) {
 					s.store.Touch(key)
 					return pinned, nil
 				}
@@ -37,7 +46,7 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 	}
 
 	// Select via fallback (least loaded)
-	chosen := pickLeastLoaded(pool)
+	chosen := pickLeastLoaded(pool, staleThreshold)
 
 	// Pin the new choice
 	if key != "" {

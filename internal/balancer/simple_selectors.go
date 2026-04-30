@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"sync/atomic"
+	"time"
 )
 
 // singleSelector always returns the first healthy backend.
@@ -28,14 +29,18 @@ func (s *roundRobinSelector) Select(pool []*BackendState, _ string, _ *RequestCo
 	return pool[idx%uint64(len(pool))], nil
 }
 
-// leastLoadedSelector picks the backend with the lowest in-flight count.
+// leastLoadedSelector picks the backend with the lowest effective load.
 type leastLoadedSelector struct{}
 
-func (s leastLoadedSelector) Select(pool []*BackendState, _ string, _ *RequestContext) (*BackendState, error) {
+func (s leastLoadedSelector) Select(pool []*BackendState, _ string, ctx *RequestContext) (*BackendState, error) {
 	if len(pool) == 0 {
 		return nil, ErrNoHealthyBackend
 	}
-	return pickLeastLoaded(pool), nil
+	staleThreshold := 30 * time.Second // default
+	if ctx != nil && ctx.StaleThreshold > 0 {
+		staleThreshold = ctx.StaleThreshold
+	}
+	return pickLeastLoaded(pool, staleThreshold), nil
 }
 
 // NewSelector constructs a Selector from the strategy name.

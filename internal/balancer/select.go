@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"errors"
+	"time"
 )
 
 // ErrNoHealthyBackend is returned when all backends in a group are down.
@@ -13,14 +14,12 @@ type Selector interface {
 }
 
 // pickLeastLoaded returns the backend with the lowest effective load score.
-// Lower is better. Uses InFlight as the load signal.
-// Weight divides the score (higher weight → lower effective load).
-// Deterministic tiebreak by ID hash to avoid oscillation.
-func pickLeastLoaded(pool []*BackendState) *BackendState {
+// Lower is better. Uses scraped metrics when available, falls back to InFlight.
+func pickLeastLoaded(pool []*BackendState, staleThreshold time.Duration) *BackendState {
 	best := pool[0]
-	bestScore := loadScore(pool[0])
+	bestScore := loadScore(pool[0], staleThreshold)
 	for _, b := range pool[1:] {
-		score := loadScore(b)
+		score := loadScore(b, staleThreshold)
 		if score < bestScore {
 			best = b
 			bestScore = score
@@ -29,27 +28,42 @@ func pickLeastLoaded(pool []*BackendState) *BackendState {
 	return best
 }
 
-func loadScore(b *BackendState) float64 {
-	inflight := float64(b.InFlight.Load())
+// loadScore computes the effective load for a backend.
+// When metrics are fresh: uses scraped RunningReqs + KVCachePct weighting.
+// When stale/unavailable: falls back to local InFlight counter.
+// Weight divides the score (higher weight → lower effective load).
+// Deterministic tiebreak by ID hash to avoid oscillation.
+func loadScore(b *BackendState, staleThreshold time.Duration) float64 {
+	load := b.GetEffectiveLoad(staleThreshold)
+
+	// Add KV cache pressure when metrics are available and fresh
+	if b.MetricsAvailable {
+		b.mu.RLock()
+		cachePct := b.KVCachePct
+		fresh := time.Since(b.LastMetricsUpdate) < staleThreshold
+		b.mu.RUnlock()
+		if fresh && cachePct > 0 {
+			load += cachePct * 2.0
+		}
+	}
+
 	if b.Weight > 0 {
-		inflight /= float64(b.Weight)
+		load /= float64(b.Weight)
 	}
 	// Deterministic tiebreak: hash the ID to [0, 1)
 	tieBreak := float64(fnv64a([]byte(b.ID))%1000) * 1e-6
-	return inflight + tieBreak
+	return load + tieBreak
 }
 
 // isOverloaded reports whether a backend should be avoided.
-// Phase 1: uses InFlight count vs configured max concurrency.
-// Phase 2: incorporates scraped KV cache percentage.
-func isOverloaded(b *BackendState, maxConcurrency int, kvCachePct float64) bool {
-	_ = kvCachePct // reserved for Phase 2: scraped KV cache percentage
+// Uses local InFlight vs maxConcurrency, plus scraped KV cache percentage.
+func isOverloaded(b *BackendState, maxConcurrency int, kvCachePct float64, staleThreshold time.Duration) bool {
 	if maxConcurrency > 0 && int(b.InFlight.Load()) >= maxConcurrency {
 		return true
 	}
-	// Phase 2 (future): incorporate scraped KV cache percentage.
-	// if kvCachePct > 0 && b.KVCachePct >= kvCachePct {
-	// 	return true
-	// }
+	// Scraped KV cache percentage check
+	if kvCachePct > 0 && b.IsOverloadedByMetrics(kvCachePct, staleThreshold) {
+		return true
+	}
 	return false
 }
