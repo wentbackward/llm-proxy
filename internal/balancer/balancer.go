@@ -83,7 +83,7 @@ func (b *Balancer) Select(groupName, key string, ctx *RequestContext) (*BackendS
 
 	pool := make([]*BackendState, 0, len(grp.States))
 	for _, st := range grp.States {
-		if st.Healthy {
+		if st.IsHealthy() {
 			pool = append(pool, st)
 		}
 	}
@@ -164,6 +164,16 @@ func (b *Balancer) runHealthCheck(job *hcJob) {
 		timeout = 2 * time.Second
 	}
 
+	// Probe immediately so backends are marked before any requests arrive.
+	status, err := b.hc.probe(probeURL, timeout)
+	if err != nil || status != http.StatusOK {
+		job.failures++
+		b.markUnhealthy(job.id, job.failures)
+	} else {
+		job.failures = 0
+		b.markHealthy(job.id)
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -187,27 +197,16 @@ func (b *Balancer) runHealthCheck(job *hcJob) {
 func (b *Balancer) markHealthy(id string) {
 	for _, grp := range b.groups {
 		if st, ok := grp.States[id]; ok {
-			st.Healthy = true
-			st.ConsecutiveFailures = 0
-			st.LastHealthCheck = time.Now()
+			st.SetHealthy()
 		}
 	}
 }
 
 func (b *Balancer) markUnhealthy(id string, failures int) {
 	for _, grp := range b.groups {
-		st, ok := grp.States[id]
-		if !ok {
-			continue
+		if st, ok := grp.States[id]; ok {
+			threshold := grp.Cfg.HealthCheck.UnhealthyAfter
+			st.RecordFailure(failures, threshold)
 		}
-		st.ConsecutiveFailures = failures
-		threshold := grp.Cfg.HealthCheck.UnhealthyAfter
-		if threshold == 0 {
-			threshold = 3
-		}
-		if failures >= threshold {
-			st.Healthy = false
-		}
-		st.LastHealthCheck = time.Now()
 	}
 }
