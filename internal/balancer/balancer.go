@@ -37,16 +37,27 @@ type scrapeJob struct {
 	staleThreshold time.Duration
 	engine         EngineType
 	failures       int
+	rampUpSec      int
+	retryDelaySec  int
 }
 
 // healthJob describes one health-check probe target (fallback when metrics unavailable).
+// Includes metrics retry info to transition to ScrapeMode when /metrics becomes available.
 type healthJob struct {
-	id       string
-	url      string
-	path     string
-	interval time.Duration
-	timeout  time.Duration
-	failures int
+	id            string
+	url           string
+	path          string
+	interval      time.Duration
+	timeout       time.Duration
+	failures      int
+	rampUpSec     int
+	retryDelaySec int
+	// Metrics retry
+	metricsPath          string
+	metricsInterval      time.Duration
+	metricsTimeout       time.Duration
+	metricsScrapeEnabled bool
+	transitedToScrape    bool
 }
 
 // aliveJob describes one alive-check probe target.
@@ -57,6 +68,8 @@ type aliveJob struct {
 	unhealthyAfter int
 	probes         []config.AliveProbe
 	failures       int
+	rampUpSec      int
+	retryDelaySec  int
 }
 
 // New creates a Balancer from the config and starts background goroutines.
@@ -183,6 +196,9 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 			}
 		}
 
+		// Get recovery config for this group
+		recovery := cfg.GetRecovery(healthCfg)
+
 		if scrapeCfg != nil {
 			scrapeURL := info.url + scrapeCfg.GetScrapePath()
 			timeout := 3 * time.Second
@@ -196,6 +212,8 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 					interval:       time.Duration(scrapeCfg.GetScrapeInterval()) * time.Second,
 					timeout:        timeout,
 					staleThreshold: time.Duration(scrapeCfg.GetStaleThreshold()) * time.Second,
+					rampUpSec:      recovery.RampUpSec,
+					retryDelaySec:  recovery.RetryDelaySec,
 				}
 				if job.interval == 0 {
 					job.interval = 5 * time.Second
@@ -206,13 +224,15 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 			}
 		}
 
-		// Metrics not available - launch health-only loop
+		// Metrics not available - launch health-only loop with metrics retry
 		job := &healthJob{
-			id:       info.id,
-			url:      info.url,
-			path:     healthCfg.HealthCheck.Path,
-			interval: time.Duration(healthCfg.HealthCheck.IntervalSeconds) * time.Second,
-			timeout:  time.Duration(healthCfg.HealthCheck.TimeoutSeconds) * time.Second,
+			id:            info.id,
+			url:           info.url,
+			path:          healthCfg.HealthCheck.Path,
+			interval:      time.Duration(healthCfg.HealthCheck.IntervalSeconds) * time.Second,
+			timeout:       time.Duration(healthCfg.HealthCheck.TimeoutSeconds) * time.Second,
+			rampUpSec:     recovery.RampUpSec,
+			retryDelaySec: recovery.RetryDelaySec,
 		}
 		if job.interval == 0 {
 			job.interval = 10 * time.Second
@@ -220,6 +240,21 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 		if job.timeout == 0 {
 			job.timeout = 2 * time.Second
 		}
+
+		// Populate metrics retry info if scraping was requested but failed
+		if scrapeCfg != nil {
+			job.metricsPath = scrapeCfg.GetScrapePath()
+			job.metricsInterval = time.Duration(cfg.GetMetricsConfig(scrapeCfg).RetryIntervalSec) * time.Second
+			if job.metricsInterval == 0 {
+				job.metricsInterval = 120 * time.Second
+			}
+			job.metricsTimeout = time.Duration(cfg.GetMetricsConfig(scrapeCfg).ScrapeTimeoutSeconds) * time.Second
+			if job.metricsTimeout == 0 {
+				job.metricsTimeout = 3 * time.Second
+			}
+			job.metricsScrapeEnabled = true
+		}
+
 		b.wg.Add(1)
 		go b.runHealthCheck(job)
 	}
@@ -250,12 +285,15 @@ func (b *Balancer) startAliveChecks(cfg *config.Config) {
 
 	for _, info := range backendMap {
 		aliveCfg := cfg.GetAliveConfig(info.groups[0])
+		recovery := cfg.GetRecovery(info.groups[0])
 		job := &aliveJob{
 			id:             info.id,
 			url:            info.url,
 			interval:       time.Duration(aliveCfg.IntervalSeconds) * time.Second,
 			unhealthyAfter: aliveCfg.UnhealthyAfter,
 			probes:         aliveCfg.Probes,
+			rampUpSec:      recovery.RampUpSec,
+			retryDelaySec:  recovery.RetryDelaySec,
 		}
 		if job.interval == 0 {
 			job.interval = 60 * time.Second
@@ -279,7 +317,7 @@ func (b *Balancer) runAliveCheck(job *aliveJob) {
 			b.markUnhealthy(job.id, job.failures)
 		} else {
 			job.failures = 0
-			b.markHealthy(job.id)
+			b.markHealthy(job.id, job.rampUpSec)
 		}
 	}
 
@@ -291,13 +329,18 @@ func (b *Balancer) runAliveCheck(job *aliveJob) {
 		case <-b.done:
 			return
 		case <-ticker.C:
+			// Skip if backend is unhealthy and retry delay hasn't elapsed
+			if !b.isBackendHealthy(job.id) && !b.shouldRetry(job.id, job.retryDelaySec) {
+				continue
+			}
+
 			if len(job.probes) > 0 {
 				if alive := b.ac.checkAlive(job.url, job.probes); !alive {
 					job.failures++
 					b.markUnhealthy(job.id, job.failures)
 				} else {
 					job.failures = 0
-					b.markHealthy(job.id)
+					b.markHealthy(job.id, job.rampUpSec)
 				}
 			}
 		}
@@ -319,6 +362,10 @@ func (b *Balancer) runScrapeAndHealth(job *scrapeJob) {
 		case <-b.done:
 			return
 		case <-ticker.C:
+			// Skip if backend is unhealthy and retry delay hasn't elapsed
+			if !b.isBackendHealthy(job.id) && !b.shouldRetry(job.id, job.retryDelaySec) {
+				continue
+			}
 			b.doScrape(job)
 		}
 	}
@@ -337,17 +384,19 @@ func (b *Balancer) doScrape(job *scrapeJob) {
 
 	if !result.Parsed {
 		job.failures = 0
-		b.markHealthy(job.id)
+		b.markHealthy(job.id, job.rampUpSec)
 		b.updateMetrics(job.id, false, 0, 0, 0)
 		return
 	}
 
 	job.failures = 0
-	b.markHealthy(job.id)
+	b.markHealthy(job.id, job.rampUpSec)
 	b.updateMetrics(job.id, true, result.RunningReqs, result.WaitingReqs, result.KVCachePct)
 }
 
 // runHealthCheck probes one backend on a timer (health-only, no metrics).
+// If metrics retry is enabled, periodically tries /metrics and transitions
+// to ScrapeMode on success.
 func (b *Balancer) runHealthCheck(job *healthJob) {
 	defer b.wg.Done()
 
@@ -360,7 +409,15 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 		b.markUnhealthy(job.id, job.failures)
 	} else {
 		job.failures = 0
-		b.markHealthy(job.id)
+		b.markHealthy(job.id, job.rampUpSec)
+	}
+
+	// If metrics retry is enabled, start a secondary ticker for /metrics polling
+	var metricsChan <-chan time.Time
+	if job.metricsScrapeEnabled {
+		ticker := time.NewTicker(job.metricsInterval)
+		defer ticker.Stop()
+		metricsChan = ticker.C
 	}
 
 	ticker := time.NewTicker(job.interval)
@@ -370,23 +427,56 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 		select {
 		case <-b.done:
 			return
+
 		case <-ticker.C:
+			// Skip if backend is unhealthy and retry delay hasn't elapsed
+			if !b.isBackendHealthy(job.id) && !b.shouldRetry(job.id, job.retryDelaySec) {
+				continue
+			}
+
 			status, err := b.hc.probe(probeURL, job.timeout)
 			if err != nil || status != http.StatusOK {
 				job.failures++
 				b.markUnhealthy(job.id, job.failures)
 			} else {
 				job.failures = 0
-				b.markHealthy(job.id)
+				b.markHealthy(job.id, job.rampUpSec)
+			}
+
+		case <-metricsChan:
+			// Periodically try /metrics to see if it's now available
+			if job.metricsScrapeEnabled && !job.transitedToScrape {
+				metricsURL := job.url + job.metricsPath
+				body, err := b.hc.scrapeMetrics(metricsURL, job.metricsTimeout)
+				if err == nil && len(body) > 0 {
+					result := parsePrometheusMetrics(strings.NewReader(string(body)), "")
+					if result.Parsed {
+						// Transition to ScrapeMode
+						job.transitedToScrape = true
+						// Spawn a new scrape goroutine and exit this health goroutine
+						scrapeJob := &scrapeJob{
+							id:            job.id,
+							url:           job.url,
+							path:          job.metricsPath,
+							interval:      5 * time.Second,
+							timeout:       job.metricsTimeout,
+							rampUpSec:     job.rampUpSec,
+							retryDelaySec: job.retryDelaySec,
+						}
+						b.wg.Add(1)
+						go b.runScrapeAndHealth(scrapeJob)
+						return // Exit the health-only goroutine
+					}
+				}
 			}
 		}
 	}
 }
 
-func (b *Balancer) markHealthy(id string) {
+func (b *Balancer) markHealthy(id string, rampUpSeconds int) {
 	for _, grp := range b.groups {
 		if st, ok := grp.States[id]; ok {
-			st.SetHealthy()
+			st.SetHealthy(rampUpSeconds)
 		}
 	}
 }
@@ -440,4 +530,25 @@ func (b *Balancer) Complete(backendID string, success, timedOut bool, ttftMs flo
 func (b *Balancer) CompleteAndDecr(backendID string, success, timedOut bool, ttftMs float64) {
 	b.Complete(backendID, success, timedOut, ttftMs)
 	b.Decr(backendID)
+}
+
+// isBackendHealthy checks if the backend is currently healthy.
+func (b *Balancer) isBackendHealthy(id string) bool {
+	for _, grp := range b.groups {
+		if st, ok := grp.States[id]; ok {
+			return st.IsHealthy()
+		}
+	}
+	return false
+}
+
+// shouldRetry checks if enough time has passed since the backend became unhealthy
+// to warrant another health check attempt.
+func (b *Balancer) shouldRetry(id string, retryDelaySec int) bool {
+	for _, grp := range b.groups {
+		if st, ok := grp.States[id]; ok {
+			return st.ShouldRetry(retryDelaySec)
+		}
+	}
+	return true
 }

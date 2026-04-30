@@ -34,6 +34,7 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 	if key != "" {
 		if entry, ok := s.store.Get(key); ok {
 			if pinned := findByID(pool, entry.BackendID); pinned != nil {
+				// Honor existing pins even during ramp-up (cache locality matters)
 				if !isOverloaded(pinned, s.maxConcurrency, s.kvCachePct, staleThreshold) {
 					s.store.Touch(key)
 					return pinned, nil
@@ -45,11 +46,31 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 		}
 	}
 
-	// Select via fallback (least loaded)
-	chosen := pickLeastLoaded(pool, staleThreshold)
+	// Filter out ramping-up backends for NEW affinity pins
+	// (they can still be selected if no other option exists)
+	filtered := make([]*BackendState, 0, len(pool))
+	ramping := make([]*BackendState, 0, len(pool))
+	for _, b := range pool {
+		if b.IsRampingUp() {
+			ramping = append(ramping, b)
+		} else {
+			filtered = append(filtered, b)
+		}
+	}
 
-	// Pin the new choice
-	if key != "" {
+	// Prefer non-ramping backends for new pins
+	var chosen *BackendState
+	if len(filtered) > 0 {
+		chosen = pickLeastLoaded(filtered, staleThreshold)
+	} else if len(ramping) > 0 {
+		// All backends are ramping — pick the least loaded among them
+		chosen = pickLeastLoaded(ramping, staleThreshold)
+	} else {
+		chosen = pickLeastLoaded(pool, staleThreshold)
+	}
+
+	// Pin the new choice (but not to ramping-up backends if alternatives exist)
+	if key != "" && chosen != nil && !chosen.IsRampingUp() {
 		s.store.Set(key, AffinityEntry{BackendID: chosen.ID})
 	}
 

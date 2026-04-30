@@ -21,6 +21,11 @@ type BackendState struct {
 	ConsecutiveFailures int
 	LastHealthCheck     time.Time
 
+	// Recovery state (protected by mu)
+	RampingUp      bool
+	RampUpEnd      time.Time
+	UnhealthySince time.Time
+
 	// Scraped metrics (protected by mu)
 	MetricsAvailable  bool
 	RunningReqs       int
@@ -53,13 +58,42 @@ func (b *BackendState) IsHealthy() bool {
 	return b.Healthy
 }
 
-// SetHealthy marks the backend as healthy and resets failure count.
-func (b *BackendState) SetHealthy() {
+// IsRampingUp returns whether the backend is in ramp-up phase.
+// During ramp-up, existing affinity pins are honored but new pins
+// are declined (prefer other backends for new sessions).
+func (b *BackendState) IsRampingUp() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if !b.RampingUp {
+		return false
+	}
+	// Check if ramp-up period has expired
+	if time.Now().After(b.RampUpEnd) {
+		return false
+	}
+	return true
+}
+
+// FinishRampUp marks the backend as fully recovered (exit ramp-up).
+func (b *BackendState) FinishRampUp() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.RampingUp = false
+}
+
+// SetHealthy marks the backend as healthy and enters ramp-up phase.
+func (b *BackendState) SetHealthy(rampUpSeconds int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.Healthy = true
 	b.ConsecutiveFailures = 0
 	b.LastHealthCheck = time.Now()
+	if rampUpSeconds > 0 {
+		b.RampingUp = true
+		b.RampUpEnd = time.Now().Add(time.Duration(rampUpSeconds) * time.Second)
+	} else {
+		b.RampingUp = false
+	}
 }
 
 // RecordFailure increments the failure counter and marks unhealthy
@@ -71,10 +105,25 @@ func (b *BackendState) RecordFailure(failures, threshold int) {
 	if threshold == 0 {
 		threshold = 3
 	}
-	if failures >= threshold {
+	if failures >= threshold && b.Healthy {
 		b.Healthy = false
+		b.UnhealthySince = time.Now()
 	}
 	b.LastHealthCheck = time.Now()
+}
+
+// ShouldRetry returns whether enough time has passed since becoming unhealthy
+// to warrant another health check attempt.
+func (b *BackendState) ShouldRetry(retryDelaySec int) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.Healthy {
+		return true
+	}
+	if retryDelaySec <= 0 {
+		return true
+	}
+	return time.Since(b.UnhealthySince) >= time.Duration(retryDelaySec)*time.Second
 }
 
 // UpdateMetrics stores freshly scraped metrics for this backend.
