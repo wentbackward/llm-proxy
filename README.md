@@ -21,6 +21,7 @@ An enterprise grade, highly performant route virtualizer for your infrerence wor
 | **Curate and Control** approved models | **Reliable** low latency and highly available  |
 | Smart **load-balancing** increases concurrent throughput and ensures maximum benefit of KV cache utlization | **Inspect** and debug messages to speed up analysis and problem solving  |
 | **Set** and **clamp** sampling parameters to ensure optimal model performance | Deploy **defenders** like loop detector and supress 'zero' messages before they waste valuable tokens |
+| **RFC 3986 compliant** URL resolution — no string concatenation, no double-prefix bugs | **Graduated recovery** — backends come back gently with ramp-up and affinity awareness |
 
 ## Virtualize
 
@@ -80,15 +81,17 @@ Point your client at `http://localhost:4000/v1`. Metrics at `http://localhost:90
 backends:
   - id: local
     type: openai
-    base_url: "http://gpu-server:8000"
+    base_url: "http://gpu-server:8000/v1/"
     timeout_seconds: 300
 
   - id: hf
     type: openai
-    base_url: "https://router.huggingface.co"
+    base_url: "https://router.huggingface.co/v1/"
     api_key: "${HF_TOKEN}"
     skip_probe: true
 ```
+
+**URL resolution (RFC 3986).** The proxy combines `base_url` with the request path using standard URL resolution ([RFC 3986 §5.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.2)). Include a trailing slash on `base_url` when your backend uses a path prefix (e.g. `"http://host:port/v1/"`) so that relative resolution appends correctly. The incoming request path from the client is forwarded verbatim — the proxy does not manipulate it.
 
 Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config. Hot-reload with `SIGHUP` — config, log level, and backend probes update without restart.
 
@@ -159,7 +162,15 @@ The **default backend** is the one marked `default: true` in its config, or the 
 
 ### Load balancing
 
-Instead of pinning a route to a single backend, use `backend_group:` to spread traffic across a named group. The proxy supports four strategies — `sticky_least_loaded` (pins sessions for KV-cache locality), `least_loaded`, `round_robin`, and `single`. See [Configuration → Load Balancing](docs/configuration.md#load-balancing) for the full reference.
+Instead of pinning a route to a single backend, use `backend_group:` to spread traffic across a named group. The proxy supports four strategies — `sticky_least_loaded` (pins sessions for KV-cache locality), `least_loaded`, `round_robin`, and `single`.
+
+**Three-layer health model.** Each backend is monitored on three signals: **Alive** (OR-based lightweight chat or HTTP GET), **Quality** (rolling window of request outcomes), and **Capacity** (composite of scraped metrics, in-flight, and stalled requests). Backends must be alive to receive traffic; quality and capacity feed the load score.
+
+**Graduated recovery.** When a backend comes back online, it enters a ramp-up phase — existing affinity pins are honored, new pins are declined. Gives the backend time to warm its KV cache without absorbing new sessions prematurely.
+
+**Request defenders.** Pre-routing checks short-circuit pathological requests: loop detection catches repeated identical requests from agent retry loops; zero-content detection rejects trivial user content wrapped in massive system/tool definitions. Both configurable globally and per-route.
+
+See [Configuration → Load Balancing](docs/configuration.md#load-balancing) for the full reference and [LOAD-BALANCING.md](LOAD-BALANCING.md) for the design specification.
 
 ### Parameter profiles — defaults, caller, clamp
 

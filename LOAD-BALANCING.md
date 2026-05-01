@@ -64,15 +64,23 @@ Implications for routing:
              │   │                          │      │ vLLM/SGLang│
              │   │  ┌────────────────────┐  │      └────────────┘
              │   │  │ backend state      │  │
-             │   │  │  health, metrics   │  │      (one entry per
-             │   │  └────────────────────┘  │       backend in pool)
+             │   │  │  alive, quality,   │  │      (one entry per
+             │   │  │  capacity, metrics │  │       backend in pool)
+             │   │  └────────────────────┘  │
              │   │                          │
              │   │  goroutines:             │
-             │   │   - health checker      │
+             │   │   - alive checker       │
              │   │   - metrics scraper     │
+             │   │   - health checker      │
              │   │   - affinity sweeper    │
              │   └──────────────────────────┘
 ```
+
+### URL resolution (RFC 3986)
+
+All URL construction — proxy forwarding, health probes, alive probes, metrics scraping — uses standard URL resolution per [RFC 3986 §5.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.2). The `base_url` is combined with the endpoint path using `url.ResolveReference`. Absolute paths (starting with `/`) replace the base URL's path entirely; relative paths append to it.
+
+Operators should configure `base_url` with a trailing slash when using a path prefix (e.g. `"http://host:port/v1/"`) so that relative resolution appends correctly. The incoming request path from the client is forwarded verbatim — the proxy does not manipulate it.
 
 ## Configuration schema (additive)
 
@@ -160,34 +168,45 @@ enrich the routing decision; they aren't required for correctness.
 Per backend, in memory:
 
 ```go
-type Backend struct {
-    URL                  string
-    Weight               int           // from config, default 1
+type BackendState struct {
+    ID string
+    URL string
 
     // Health
     Healthy              bool
     ConsecutiveFailures  int
     LastHealthCheck      time.Time
 
+    // Recovery
+    RampingUp      bool
+    RampUpEnd      time.Time
+    UnhealthySince time.Time
+
     // Engine type (detected at startup)
     EngineType           string        // "vllm" | "sglang" | "unknown"
-    MetricsEnabled       bool          // /metrics probe succeeded
+    MetricsAvailable     bool          // /metrics probe succeeded
 
-    // Metrics-derived (nil/zero when MetricsEnabled = false)
+    // Metrics-derived (nil/zero when MetricsAvailable = false)
     RunningReqs          int
     WaitingReqs          int
     KVCachePct           float64
     LastMetricsUpdate    time.Time
 
     // Local fallback (always tracked, even when metrics enabled)
-    InFlightLocal        atomic.Int64  // requests currently being proxied
+    InFlight             atomic.Int64  // requests currently being proxied
+
+    // Flow tracking (rolling window)
+    Flow                 *FlowStats    // dispatched, completed, success, failure, timeout, stalled
 }
 ```
 
-`InFlightLocal` is incremented when the proxy dispatches to this backend,
+`InFlight` is incremented when the proxy dispatches to this backend,
 decremented when the response completes (or errors). It's the routing
 decision's source of truth when metrics are stale or disabled.
 
+`FlowStats` maintains a rolling window of request outcomes. The window
+duration is configurable (multiplier-based or fixed). It feeds the
+Quality signal in the composite load score.
 ## Affinity table
 
 ```go
@@ -330,12 +349,13 @@ func selectBackend(req Request, route Route) (*Backend, error) {
     return chosen, nil
 }
 
-func isOverloaded(b *Backend, o Overload) bool {
-    if !b.MetricsEnabled || time.Since(b.LastMetricsUpdate) > cfg.StaleThreshold {
+func isOverloaded(b *BackendState, o Overload) bool {
+    // Capacity: composite of scraped metrics, in-flight, and stalled requests
+    if !b.MetricsAvailable || time.Since(b.LastMetricsUpdate) > cfg.StaleThreshold {
         // Metrics stale or disabled. Use action policy.
         switch o.StaleMetricsAction {
         case "pin":   return false                           // trust the pin
-        case "bail":  return b.InFlightLocal.Load() >= o.MaxConcurrency
+        case "bail":  return b.InFlight.Load() >= o.MaxConcurrency
         default:      return false
         }
     }
@@ -343,112 +363,63 @@ func isOverloaded(b *Backend, o Overload) bool {
            b.KVCachePct  >= o.KVCachePct
 }
 
-func pickLeastLoaded(pool []*Backend) *Backend {
-    return argmin(pool, func(b *Backend) float64 {
-        // Lower is better. Use metrics if available, fall back to local.
-        var load float64
-        if b.MetricsEnabled && time.Since(b.LastMetricsUpdate) < cfg.StaleThreshold {
-            load = float64(b.RunningReqs) + b.KVCachePct*2.0
-        } else {
-            load = float64(b.InFlightLocal.Load())
-        }
-        // Weight inversely (higher weight → lower effective load)
-        load /= float64(b.Weight)
-        // Deterministic tiebreak by URL hash to avoid oscillation
-        load += float64(stringHash(b.URL)%1000) * 1e-6
-        return load
+func loadScore(b *BackendState) float64 {
+    // Composite score: scraped metrics + flow quality penalties
+    var load float64
+    if b.MetricsAvailable && time.Since(b.LastMetricsUpdate) < cfg.StaleThreshold {
+        load = float64(b.RunningReqs) + b.KVCachePct*2.0
+    } else {
+        load = float64(b.InFlight.Load())
+    }
+    // Quality penalty: penalize backends with high failure/stall rates
+    if b.Flow != nil {
+        load += b.Flow.stalenessPenalty()
+        load += b.Flow.failurePenalty()
+        load += b.Flow.stallPenalty()
+    }
+    return load
+}
+
+func pickLeastLoaded(pool []*BackendState) *BackendState {
+    return argmin(pool, func(b *BackendState) float64 {
+        return loadScore(b)
     })
 }
 ```
 
-## Health checking
+## Health and recovery model
 
-Health derives from whichever signal is available, in this priority:
+The proxy tracks three independent signals per backend:
 
-1. **Metrics-as-health (preferred when scraping is enabled).** If
-   `metrics_scrape.enabled` is true AND the capability probe succeeded
-   on this backend, the metrics scrape *is* the health signal. A
-   successful scrape (200 + parseable Prometheus text) every interval
-   = healthy; consecutive scrape failures count toward
-   `unhealthy_after`. Don't run a separate `/models` check.
+### 1. Alive (OR-based)
 
-2. **`/models` fallback (when metrics aren't available).** Backends
-   without a working `/metrics` endpoint fall back to a dedicated
-   `/models` poll using the dedicated health-check loop. Same
-   `unhealthy_after` semantics, separate goroutine.
+Determines whether the backend process is reachable. Two probes, either succeeding is sufficient:
 
-The reason: metrics scraping is *strictly more informative* than a
-`/models` poll. A successful scrape proves the HTTP server is alive,
-the response format is valid (no panic, no GC stall mid-emit), and you
-get fresh load data. Hitting `/models` separately every health interval
-is redundant work once `/metrics` is established as a per-tick
-heartbeat.
+- **Lightweight chat** — POST `/v1/chat/completions` with `max_tokens: 1`. Validates the full inference pipeline.
+- **HTTP GET** — GET `/health` (or any configured path). Validates HTTP connectivity.
 
-```go
-// One goroutine per backend handles BOTH scraping and health for that
-// backend. The goroutine is selected at startup based on capability:
-func runBackendLoop(b *Backend, route Route) {
-    if b.MetricsEnabled {
-        runMetricsAndHealthLoop(b, route)   // scrape /metrics, health derived
-    } else {
-        runHealthOnlyLoop(b, route)         // poll /models
-    }
-}
+Independent from metrics scraping. Runs on its own goroutine and interval (default: 60s). A backend must be alive to receive traffic.
 
-func runMetricsAndHealthLoop(b *Backend, route Route) {
-    ticker := time.NewTicker(route.MetricsScrape.Interval)
-    defer ticker.Stop()
-    for range ticker.C {
-        text, err := scrapeMetrics(b.URL + route.MetricsScrape.Path)
-        if err != nil {
-            b.ConsecutiveFailures++
-            if b.ConsecutiveFailures >= route.HealthCheck.UnhealthyAfter {
-                b.Healthy = false
-            }
-            continue
-        }
-        running, waiting, kvPct, ok := parseMetrics(text, b.EngineType)
-        if !ok {
-            b.ConsecutiveFailures++
-            if b.ConsecutiveFailures >= route.HealthCheck.UnhealthyAfter {
-                b.Healthy = false
-            }
-            continue
-        }
-        b.RunningReqs = running
-        b.WaitingReqs = waiting
-        b.KVCachePct = kvPct
-        b.LastMetricsUpdate = time.Now()
-        b.Healthy = true
-        b.ConsecutiveFailures = 0
-    }
-}
+### 2. Quality (rolling window)
 
-func runHealthOnlyLoop(b *Backend, route Route) {
-    ticker := time.NewTicker(route.HealthCheck.Interval)
-    defer ticker.Stop()
-    for range ticker.C {
-        resp, err := httpGetWithTimeout(b.URL + route.HealthCheck.Path,
-                                        route.HealthCheck.Timeout)
-        if err == nil && resp.StatusCode == 200 {
-            b.Healthy = true
-            b.ConsecutiveFailures = 0
-        } else {
-            b.ConsecutiveFailures++
-            if b.ConsecutiveFailures >= route.HealthCheck.UnhealthyAfter {
-                b.Healthy = false
-            }
-        }
-        if resp != nil {
-            resp.Body.Close()
-        }
-    }
-}
-```
+Tracks request outcomes over a rolling window (configurable: multiplier-based or fixed-duration). Records dispatched, completed, success, failure, timeout, and stalled counts. Penalizes backends with degraded outcome ratios in the composite load score.
 
-When a backend transitions unhealthy → healthy, do **not** flush its
-affinity entries — clients with that pin can resume using the warm KV
-cache once it's available again.
+### 3. Capacity (composite score)
+
+Combines scraped metrics (KV cache %, running/queued requests), local in-flight count, and stalled requests into a single load score. Used by `sticky_least_loaded` to pick the least-loaded backend.
+
+### Graduated recovery
+
+When a backend comes back online, it enters a ramp-up phase (`ramp_up_seconds`, default 60s). During ramp-up:
+- Existing affinity pins are honored (sessions resume)
+- New affinity pins are declined (give the backend time to warm its KV cache)
+- After ramp-up expires, the backend is fully restored
+
+A `retry_delay_seconds` (default 30s) prevents hammering a dead backend with rapid re-probes.
+
+### Metrics retry
+
+If `/metrics` is unavailable at startup, the proxy falls back to health-only mode and periodically retries `/metrics` (default every 120s). When it becomes available, the proxy seamlessly transitions to full scraping — no restart required.
 
 ## Metrics scraping (when enabled)
 
@@ -652,41 +623,44 @@ These let the operator see how often defenders fire without scraping logs.
 
 ## Phasing
 
-### Phase 1 — MVP (~1 day)
+### Phase 1 — MVP ✅
 
 - Multi-backend per route in config
 - Health check loop
 - `sticky_least_loaded` strategy with `first_user_message` affinity
-- Local in-flight tracking (`InFlightLocal`) for overload detection
-- No metrics scraping yet — `MetricsEnabled = false` for all backends
+- Local in-flight tracking (`InFlight`) for overload detection
 - LRU + TTL on affinity table
 
-This alone fixes the "4 sessions, 1 backend" hotspot problem and
-preserves cache locality.
-
-### Phase 2 — Telemetry-aware (~1 day)
+### Phase 2 — Telemetry-aware ✅
 
 - Probe `/metrics` on startup + SIGHUP per backend
 - Background scrape loop, parse vLLM and SGLang Prometheus formats
 - Switch `pickLeastLoaded` and `isOverloaded` to use scraped metrics
 - `stale_metrics_action` config
+- Startup probe with retry budget (3 retries, 5s backoff)
+- Health-only fallback mode with periodic metrics retry (every 120s)
 
-### Phase 2.5 — Request defenders (~1 day)
-
-Can land alongside Phase 1 or Phase 2; doesn't depend on telemetry
-scraping. Two independent pieces:
+### Phase 2.5 — Request defenders ✅
 
 - **Wire zero-content detection** into the global+per-route config
-  pattern. Existing implementation just needs a config switch and the
-  resolution rule (per-route → global → off).
-- **Add loop detection**: body-hash counter map (LRU-bounded, TTL-evicted),
+  pattern. Resolution rule: per-route → global → off.
+- **Loop detection**: body-hash counter map (LRU-bounded, TTL-evicted),
   forcing-message injector, escalation to `refuse_429` if the injection
   doesn't break the loop. Reuses the same affinity-key derivation as
   `sticky_least_loaded`.
 
 Defender-specific metrics + response headers (see "Observability" above).
 
-### Phase 3 — Polish (optional)
+### Phase 2.1–2.6 — Health recovery redesign ✅
+
+- **Phase 2.1**: Monitoring config (`load_balancing` top-level block, per-group overrides, resolution helpers)
+- **Phase 2.2**: Flow tracker (rolling window of request outcomes)
+- **Phase 2.3**: Composite score (flow quality penalties integrated into load scoring)
+- **Phase 2.4**: Alive checker (OR-based lightweight chat OR HTTP GET)
+- **Phase 2.5**: Graduated recovery (retry delay, ramp-up phase, affinity awareness)
+- **Phase 2.6**: Metrics retry (periodic retry in health-only mode, seamless transition to scrape mode)
+
+### Phase 3 — Polish (future)
 
 - Drain mode (mark a backend "draining" before stopping it; existing
   affinities stick, no new affinities created)
@@ -701,6 +675,10 @@ Defender-specific metrics + response headers (see "Observability" above).
   scrapes despite the route being busy is probably engine-deadlocked.
   Mark suspicious; consider draining new affinity until the gauges
   recover. Defer until a real incident; cheap to add when it matters.
+
+### Infrastructure improvements ✅
+
+- **RFC 3986 URL resolution**: All URL construction (proxy forwarding, health probes, alive probes, metrics scraping) uses `url.ResolveReference` per RFC 3986 §5.2.2. Eliminates string concatenation and double-prefix bugs. Operators configure `base_url` with a trailing slash when using a path prefix.
 
 ## Configuration example (full)
 

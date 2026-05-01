@@ -77,7 +77,12 @@ backends:
 ```
 
 - **`type`** — `openai`, `anthropic`, or `ollama`. Determines auth header format, stream parsing, and `enable_thinking` translation. Must match the protocol the client speaks: OpenAI format (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) routes to `openai` backends; Anthropic format (`/v1/messages`) routes to `anthropic` backends; Ollama-native format (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) routes to `ollama` backends.
-- **`base_url`** — the full base URL including any version or path segments (e.g. `https://api.openai.com/v1`, `https://api.novita.ai/openai/v1`, `http://gpu-server:8000`). Taken verbatim — the proxy does not strip or append path components.
+- **`base_url`** — the full base URL for the backend. Include any version or path segments (e.g. `https://api.openai.com/v1/`, `https://api.novita.ai/openai/v1/`, `http://gpu-server:8000/v1/`).
+  
+  **URL resolution (RFC 3986).** The proxy combines `base_url` with the request path using standard URL resolution ([RFC 3986 §5.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.2)). Absolute paths (starting with `/`) replace the base URL's path entirely. Relative paths append to it. As a consequence:
+  - Include a trailing slash on `base_url` when your backend uses a path prefix (e.g. `"http://host:port/v1/"`), so that relative resolution appends correctly.
+  - Health-check and alive-probe paths are absolute (e.g. `/v1/models`, `/health`) — they replace the base path. Specify them exactly as the backend expects.
+  - The incoming request path from the client is forwarded verbatim; the proxy does not manipulate it.
 - **`api_key`** — static key or OAuth token. Sent to the backend using the auth header format determined by `auth_type`. If empty, the client's original auth headers pass through to the backend.
 - **`auth_type`** — `bearer` or `x-api-key`. Controls which HTTP header carries the API key. Default: `bearer` for `openai` backends, `x-api-key` for `anthropic` backends. Override to `bearer` when using OAuth tokens with Anthropic.
 - **`timeout_seconds`** — idle timeout per request. If no bytes flow for this duration, the request is cancelled. Default: 300.
@@ -338,6 +343,35 @@ routes:
 
 When a route needs to distribute traffic across multiple backends, define a **group** and assign backends to it. Routes reference the group via `backend_group:` instead of `backend:`.
 
+### Top-level `load_balancing`
+
+Global defaults for monitoring and recovery behavior. Per-group overrides are applied on top.
+
+```yaml
+load_balancing:
+  alive:
+    interval_seconds: 60
+    unhealthy_after: 3
+    probes:
+      - type: lightweight_chat
+        timeout_seconds: 5
+      - type: http_get
+        path: /health
+        timeout_seconds: 2
+  metrics:
+    startup_retries: 3
+    startup_backoff_seconds: 5
+    retry_interval_seconds: 120
+    scrape_timeout_seconds: 3
+  flow_tracking:
+    window_mode: multiplier  # multiplier | fixed
+    window_multiplier: 2.0
+    window_fixed_seconds: 300
+  recovery:
+    retry_delay_seconds: 30
+    ramp_up_seconds: 60
+```
+
 ### Groups
 
 ```yaml
@@ -345,8 +379,8 @@ groups:
   coder-cluster:
     strategy: sticky_least_loaded  # default; also: least_loaded, round_robin, single
     affinity:
-      key: canonical_prefix        # default; also: none, header:X-Session-ID
-      prefix_bytes: 1024           # default: 1024
+      key: first_user_message      # default; also: none, header:X-Session-ID
+      max_content_bytes: 2048      # default: 2048
       ttl_seconds: 3600            # default: 3600
       max_entries: 10000           # default: 10000
     overload:
@@ -356,6 +390,15 @@ groups:
       interval_seconds: 10         # default
       timeout_seconds: 2           # default
       unhealthy_after: 3           # default
+    metrics_scrape:
+      enabled: auto                # auto | true | false
+      interval_seconds: 5
+      path: /metrics
+      stale_threshold_seconds: 30
+    monitoring:                    # per-group override of global load_balancing
+      flow_tracking:
+        window_mode: fixed
+        window_fixed_seconds: 600
 ```
 
 ### Strategies
@@ -367,7 +410,7 @@ groups:
 
 ### Affinity keys
 
-- **`canonical_prefix`** (default) — hashes the leading N bytes of the conversation (system + user messages) to produce a stable key. Same conversation prefix → same backend.
+- **`first_user_message`** (default) — hashes the content of the first user message to produce a stable key. Stable across all turns of a session because the opening prompt never changes.
 - **`header:NAME`** — uses the value of the named HTTP header as the affinity key. Useful for passing session IDs from the client.
 - **`none`** — no affinity. Every request is distributed independently.
 
@@ -379,11 +422,11 @@ Add `group:` to a backend to join it to a named group:
 backends:
   - id: vllm-1
     type: openai
-    base_url: "http://10.0.0.1:8000/v1"
+    base_url: "http://10.0.0.1:8000/v1/"
     group: coder-cluster
   - id: vllm-2
     type: openai
-    base_url: "http://10.0.0.2:8000/v1"
+    base_url: "http://10.0.0.2:8000/v1/"
     group: coder-cluster
 ```
 
@@ -399,6 +442,53 @@ routes:
 ```
 
 `backend:` and `backend_group:` are mutually exclusive — a route must specify exactly one.
+
+### Health and recovery model
+
+The proxy tracks three independent signals per backend:
+
+1. **Alive** — OR-based: a lightweight chat probe (`max_tokens: 1`) OR a GET to `/health`. Either succeeding means the backend is reachable. Independent from metrics scraping.
+2. **Quality** — rolling window of flow stats (success/failure ratio, stall rate, staleness). Penalizes backends with degraded outcomes.
+3. **Capacity** — composite of scraped metrics (KV cache %, running/queued requests), local in-flight count, and stalled requests. Determines overload.
+
+A backend must be **alive** to receive traffic. Within alive backends, **quality** and **capacity** feed the composite load score used by `sticky_least_loaded`.
+
+**Graduated recovery:** When a backend comes back online, it enters a ramp-up phase (`ramp_up_seconds`, default 60s). During ramp-up, existing affinity pins are honored but new pins are declined — giving the backend time to warm its KV cache without absorbing new sessions prematurely. A `retry_delay_seconds` (default 30s) prevents hammering a dead backend with rapid re-probes.
+
+**Metrics retry:** If `/metrics` is unavailable at startup, the proxy falls back to health-only mode and periodically retries `/metrics` (default every 120s). When it becomes available, the proxy seamlessly transitions to full scraping — no restart required.
+
+### Request defenders
+
+Pre-routing checks that can short-circuit pathological requests before they reach a backend. Globally configurable, per-route overridable:
+
+```yaml
+defenders:                      # global defaults
+  loop_detection:
+    enabled: true
+    consecutive_threshold: 3
+    window_seconds: 60
+    action: inject_forcing_message
+    escalate_after: 2
+    escalate_action: refuse_429
+  zero_content_detection:
+    enabled: true
+    min_user_content_chars: 10
+    min_total_input_tokens: 2000
+    action: refuse_400
+
+routes:
+  - virtual_model: gresh-coder
+    backend_group: coder-cluster
+    real_model: Qwen/Qwen3.6-27B-AWQ-INT4
+    defenders:                  # per-route override
+      loop_detection:
+        enabled: false
+```
+
+- **Loop detection** — detects repeated identical requests (same affinity key + last user message hash) within a sliding window. Action: inject a forcing message to break the loop, or refuse with 429.
+- **Zero-content detection** — rejects requests where the user content is trivial relative to the total payload size. Prevents burning tokens on empty prompts wrapped in massive system/tool definitions.
+
+See [LOAD-BALANCING.md](../LOAD-BALANCING.md) for the full design specification.
 
 ## Telemetry
 
