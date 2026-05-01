@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -72,6 +73,15 @@ type aliveJob struct {
 	retryDelaySec  int
 }
 
+// backendIDs extracts the ID of each backend for logging.
+func backendIDs(backends []*config.Backend) []string {
+	ids := make([]string, len(backends))
+	for i, b := range backends {
+		ids[i] = b.ID
+	}
+	return ids
+}
+
 // New creates a Balancer from the config and starts background goroutines.
 func New(cfg *config.Config) *Balancer {
 	b := &Balancer{
@@ -87,6 +97,8 @@ func New(cfg *config.Config) *Balancer {
 			windowSec := cfg.GetFlowWindowDuration(grpCfg)
 			states[be.ID] = NewBackendState(be.ID, be.BaseURL, 1, windowSec)
 		}
+
+		log.Printf("[lb] group %-20s strategy=%-20s backends=[%s]", name, grpCfg.Strategy, strings.Join(backendIDs(cfg.GroupBackends(name)), ", "))
 
 		var selector Selector
 		if grpCfg.Strategy == "sticky_least_loaded" {
@@ -133,10 +145,16 @@ func (b *Balancer) Select(groupName, key string, ctx *RequestContext) (*BackendS
 	}
 
 	if len(pool) == 0 {
+		log.Printf("[lb] group %-20s NO HEALTHY BACKENDS (pool=%d/%d)", groupName, len(pool), len(grp.States))
 		return nil, ErrNoHealthyBackend
 	}
 
-	return grp.Selector.Select(pool, key, ctx)
+	selected, err := grp.Selector.Select(pool, key, ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[lb] group %-20s → %-20s (pool=%d, affinity=%s)", groupName, selected.ID, len(pool), key)
+	return selected, nil
 }
 
 // Incr increments the in-flight counter for a backend.
@@ -476,19 +494,29 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 func (b *Balancer) markHealthy(id string, rampUpSeconds int) {
 	for _, grp := range b.groups {
 		if st, ok := grp.States[id]; ok {
+			wasHealthy := st.IsHealthy()
 			st.SetHealthy(rampUpSeconds)
+			if !wasHealthy {
+				log.Printf("[lb] backend %-20s HEALTHY (ramp-up=%ds)", id, rampUpSeconds)
+			}
 		}
 	}
 }
 
 func (b *Balancer) markUnhealthy(id string, failures int) {
 	for _, grp := range b.groups {
-		if st, ok := grp.States[id]; ok {
-			threshold := grp.Cfg.HealthCheck.UnhealthyAfter
-			if threshold == 0 {
-				threshold = 3
-			}
-			st.RecordFailure(failures, threshold)
+		st, ok := grp.States[id]
+		if !ok {
+			continue
+		}
+		wasHealthy := st.IsHealthy()
+		threshold := grp.Cfg.HealthCheck.UnhealthyAfter
+		if threshold == 0 {
+			threshold = 3
+		}
+		st.RecordFailure(failures, threshold)
+		if wasHealthy && !st.IsHealthy() {
+			log.Printf("[lb] backend %-20s UNHEALTHY (failures=%d)", id, failures)
 		}
 	}
 }
