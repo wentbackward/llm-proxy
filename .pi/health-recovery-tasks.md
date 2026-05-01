@@ -28,14 +28,14 @@
 - [x] Step 19: `make check`
 
 ## Phase 2.5 — Graduated Recovery
-- [ ] Step 20: Retry delay on unhealthy transition
-- [ ] Step 21: Ramp-up phase on recovery
-- [ ] Step 22: Affinity awareness during ramp-up
-- [ ] Step 23: Tests for recovery behavior
-- [ ] Step 24: `make check`
+- [x] Step 20: Retry delay on unhealthy transition
+- [x] Step 21: Ramp-up phase on recovery
+- [x] Step 22: Affinity awareness during ramp-up
+- [x] Step 23: Tests for recovery behavior
+- [x] Step 24: `make check`
 
 ## Phase 2.6 — Metrics Retry
-- [ ] Step 25: Periodic `/metrics` retry in HealthMode
-- [ ] Step 26: Seamless transition to ScrapeMode on success
-- [ ] Step 27: Tests for metrics retry
-- [ ] Step 28: `make check`
+- [x] Step 25: Periodic `/metrics` retry in HealthMode
+- [x] Step 26: Seamless transition to ScrapeMode on success
+- [x] Step 27: Tests for metrics retry
+- [x] Step 28: `make check`

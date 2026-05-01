@@ -373,7 +373,7 @@ func (b *Balancer) runScrapeAndHealth(job *scrapeJob) {
 
 // doScrape performs one scrape cycle and updates backend state.
 func (b *Balancer) doScrape(job *scrapeJob) {
-	body, err := b.hc.scrapeMetrics(job.url+job.path, job.timeout)
+	body, err := b.hc.scrapeMetrics(resolveProbeURL(job.url, job.path), job.timeout)
 	if err != nil {
 		job.failures++
 		b.markUnhealthy(job.id, job.failures)
@@ -400,7 +400,7 @@ func (b *Balancer) doScrape(job *scrapeJob) {
 func (b *Balancer) runHealthCheck(job *healthJob) {
 	defer b.wg.Done()
 
-	probeURL := job.url + job.path
+	probeURL := resolveProbeURL(job.url, job.path)
 
 	// Probe immediately so backends are marked before any requests arrive.
 	status, err := b.hc.probe(probeURL, job.timeout)
@@ -446,7 +446,7 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 		case <-metricsChan:
 			// Periodically try /metrics to see if it's now available
 			if job.metricsScrapeEnabled && !job.transitedToScrape {
-				metricsURL := job.url + job.metricsPath
+				metricsURL := resolveProbeURL(job.url, job.metricsPath)
 				body, err := b.hc.scrapeMetrics(metricsURL, job.metricsTimeout)
 				if err == nil && len(body) > 0 {
 					result := parsePrometheusMetrics(strings.NewReader(string(body)), "")

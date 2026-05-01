@@ -26,15 +26,16 @@ func newAliveChecker() *aliveChecker {
 }
 
 // checkAlive performs OR-based alive check: succeeds if ANY probe succeeds.
-func (ac *aliveChecker) checkAlive(url string, probes []config.AliveProbe) bool {
+func (ac *aliveChecker) checkAlive(baseURL string, probes []config.AliveProbe) bool {
 	for _, probe := range probes {
+		probeURL := resolveProbeURL(baseURL, probe.Path)
 		switch probe.Type {
 		case "lightweight_chat":
-			if ac.lightweightChatProbe(url+probe.Path, probe.TimeoutSeconds) {
+			if ac.lightweightChatProbe(probeURL, probe.TimeoutSeconds) {
 				return true
 			}
 		case "http_get":
-			if ac.httpGetProbe(url+probe.Path, probe.TimeoutSeconds) {
+			if ac.httpGetProbe(probeURL, probe.TimeoutSeconds) {
 				return true
 			}
 		}

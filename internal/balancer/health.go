@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -30,7 +31,7 @@ func newHCClient(cfg *config.Config) *hcClient {
 	}
 }
 
-func (c *hcClient) probe(url string, timeout time.Duration) (int, error) {
+func (c *hcClient) probe(targetURL string, timeout time.Duration) (int, error) {
 	client := &http.Client{
 		Transport:     c.transport,
 		Timeout:       timeout,
@@ -39,7 +40,7 @@ func (c *hcClient) probe(url string, timeout time.Duration) (int, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -55,7 +56,7 @@ func (c *hcClient) probe(url string, timeout time.Duration) (int, error) {
 }
 
 // scrapeMetrics fetches and returns the response body from a /metrics endpoint.
-func (c *hcClient) scrapeMetrics(url string, timeout time.Duration) ([]byte, error) {
+func (c *hcClient) scrapeMetrics(targetURL string, timeout time.Duration) ([]byte, error) {
 	client := &http.Client{
 		Transport:     c.transport,
 		Timeout:       timeout,
@@ -64,7 +65,7 @@ func (c *hcClient) scrapeMetrics(url string, timeout time.Duration) ([]byte, err
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -93,4 +94,21 @@ type ScrapeError struct {
 
 func (e *ScrapeError) Error() string {
 	return "scrape returned HTTP " + strconv.Itoa(e.StatusCode)
+}
+
+// resolveProbeURL joins a backend base URL with a probe path using standard
+// URL resolution (RFC 3986). Absolute probe paths (starting with "/") replace
+// the base path entirely, so "/health" on base ".../v1" resolves to
+// ".../health". This avoids duplicate API prefixes when the base URL already
+// includes one (e.g. base=".../v1", path="/v1/models" → ".../v1/models").
+func resolveProbeURL(baseURL, probePath string) string {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL + probePath // fallback to naive concat
+	}
+	ref, err := url.Parse(probePath)
+	if err != nil {
+		return baseURL + probePath
+	}
+	return base.ResolveReference(ref).String()
 }
