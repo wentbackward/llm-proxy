@@ -281,7 +281,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 // proxyOpts controls per-endpoint behavior differences in the shared proxy pipeline.
 type proxyOpts struct {
-	pathOverride string // if set, forces the backend request path (e.g. "/completions")
+	pathOverride string // if set, replaces the incoming request path (e.g. "/v1/completions")
 	protocol     string // if set, skips auto-detection (e.g. "openai" for completions)
 }
 
@@ -300,7 +300,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	// The incoming path (e.g. /v1/chat/completions) is forwarded as-is to the
 	// backend. Proper URL resolution (ResolveReference) in the director handles
 	// combining it with the base_url's path component.
-	// If pathOverride is set, use it instead (e.g. /completions, /embeddings).
+	// If pathOverride is set, use it instead of the incoming path.
 	if opts.pathOverride != "" {
 		r.URL.Path = opts.pathOverride
 	}
@@ -1277,29 +1277,28 @@ func logNonStreamingResponse(rid string, data []byte, backendType string) {
 	}
 }
 
-// handleCompletions forwards /v1/completions requests to the backend's /v1/completions
-// endpoint using the same reverse-proxy infrastructure as
-// handleProxy. FIM tokens pass through untouched — no format translation.
+// handleCompletions forwards the incoming request to the backend.
+// The original path (e.g. /v1/completions) is preserved and forwarded as-is.
+// FIM tokens pass through untouched — no format translation.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	s.proxyRequest(w, r, proxyOpts{
-		pathOverride: "/v1/completions",
-		protocol:     "openai",
+		protocol: "openai",
 	})
 }
 
-// handleEmbeddings forwards /v1/embeddings requests to the backend's /v1/embeddings endpoint.
+// handleEmbeddings forwards the incoming request to the backend.
+// The original path (e.g. /v1/embeddings) is preserved and forwarded as-is.
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	s.proxyRequest(w, r, proxyOpts{
-		pathOverride: "/v1/embeddings",
-		protocol:     "openai",
+		protocol: "openai",
 	})
 }
 
