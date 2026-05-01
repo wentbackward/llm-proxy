@@ -207,6 +207,11 @@ func Load(path string) (*Config, error) {
 	// Expand ${ENV_VAR} before parsing
 	expanded := expandEnvVars(string(raw))
 
+	// Normalize map-formatted backends/routes to list format.
+	// Allows: backends: {foo: {type: openai, ...}}  →  backends: [{id: foo, type: openai, ...}]
+	expanded = normalizeMapToList(expanded, "backends", "id")
+	expanded = normalizeMapToList(expanded, "routes", "virtual_model")
+
 	var cfg Config
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -241,6 +246,57 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// normalizeMapToList converts map-formatted YAML blocks to list format.
+// E.g. "backends: {foo: {type: openai}}" → "backends: [{id: foo, type: openai}]"
+// Only transforms if the value is a mapping (not a sequence). Preserves
+// list format unchanged. The keyField is inserted into each entry if absent.
+func normalizeMapToList(yamlText, blockName, keyField string) string {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlText), &doc); err != nil {
+		return yamlText // if we can't parse, leave it alone
+	}
+
+	// The root node is a Document node containing a Mapping node
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return yamlText
+	}
+
+	// Find the target block and convert mapping to sequence
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valNode := root.Content[i+1]
+		if keyNode.Value != blockName || valNode.Kind != yaml.MappingNode {
+			continue
+		}
+		// Convert mapping to sequence
+		seq := &yaml.Node{Kind: yaml.SequenceNode}
+		for j := 0; j < len(valNode.Content); j += 2 {
+			mapKey := valNode.Content[j].Value
+			mapVal := valNode.Content[j+1]
+			entry := &yaml.Node{Kind: yaml.MappingNode}
+			// Insert key field (id or virtual_model)
+			keyFieldNode := &yaml.Node{Kind: yaml.ScalarNode, Value: keyField}
+			keyFieldValue := &yaml.Node{Kind: yaml.ScalarNode, Value: mapKey}
+			entry.Content = append(entry.Content, keyFieldNode, keyFieldValue)
+			// Copy remaining fields
+			if mapVal.Kind == yaml.MappingNode {
+				entry.Content = append(entry.Content, mapVal.Content...)
+			}
+			seq.Content = append(seq.Content, entry)
+		}
+		valNode.Kind = seq.Kind
+		valNode.Tag = seq.Tag
+		valNode.Content = seq.Content
+	}
+
+	result, err := yaml.Marshal(&doc)
+	if err != nil {
+		return yamlText
+	}
+	return strings.TrimSpace(string(result))
 }
 
 func expandEnvVars(s string) string {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func writeTemp(t *testing.T, content string) string {
@@ -916,5 +918,94 @@ func TestShouldDropEmptyContent_NilPointerInherits(t *testing.T) {
 	route := &Route{DropEmptyContent: nil} // inherits
 	if !cfg.ShouldDropEmptyContent(route, backend) {
 		t.Error("expected true: nil route pointer should fall through to backend/global")
+	}
+}
+
+func TestNormalizeMapToList_Backends(t *testing.T) {
+	input := `
+backends:
+  foo:
+    type: openai
+    base_url: "http://localhost:8080/v1/"
+  bar:
+    type: anthropic
+    base_url: "https://api.anthropic.com/v1/"
+`
+	result := normalizeMapToList(input, "backends", "id")
+
+	// Verify it can be parsed as a list
+	var cfg struct {
+		Backends []Backend `yaml:"backends"`
+	}
+	if err := yaml.Unmarshal([]byte(result), &cfg); err != nil {
+		t.Fatalf("failed to parse normalized YAML: %v\nresult:\n%s", err, result)
+	}
+
+	if len(cfg.Backends) != 2 {
+		t.Fatalf("expected 2 backends, got %d", len(cfg.Backends))
+	}
+
+	if cfg.Backends[0].ID != "foo" {
+		t.Errorf("expected first backend id to be 'foo', got %q", cfg.Backends[0].ID)
+	}
+	if cfg.Backends[1].ID != "bar" {
+		t.Errorf("expected second backend id to be 'bar', got %q", cfg.Backends[1].ID)
+	}
+}
+
+func TestNormalizeMapToList_Routes(t *testing.T) {
+	input := `
+routes:
+  my-route:
+    backend: foo
+    real_model: "some-model"
+  another-route:
+    backend: bar
+    real_model: "another-model"
+`
+	result := normalizeMapToList(input, "routes", "virtual_model")
+
+	// Verify it can be parsed as a list
+	var cfg struct {
+		Routes []Route `yaml:"routes"`
+	}
+	if err := yaml.Unmarshal([]byte(result), &cfg); err != nil {
+		t.Fatalf("failed to parse normalized YAML: %v\nresult:\n%s", err, result)
+	}
+
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(cfg.Routes))
+	}
+
+	if cfg.Routes[0].VirtualModel != "my-route" {
+		t.Errorf("expected first route virtual_model to be 'my-route', got %q", cfg.Routes[0].VirtualModel)
+	}
+	if cfg.Routes[1].VirtualModel != "another-route" {
+		t.Errorf("expected second route virtual_model to be 'another-route', got %q", cfg.Routes[1].VirtualModel)
+	}
+}
+
+func TestNormalizeMapToList_ListFormatPreserved(t *testing.T) {
+	input := `
+backends:
+  - id: foo
+    type: openai
+    base_url: "http://localhost:8080/v1/"
+`
+	result := normalizeMapToList(input, "backends", "id")
+
+	// Verify it can be parsed as a list
+	var cfg struct {
+		Backends []Backend `yaml:"backends"`
+	}
+	if err := yaml.Unmarshal([]byte(result), &cfg); err != nil {
+		t.Fatalf("failed to parse normalized YAML: %v\nresult:\n%s", err, result)
+	}
+
+	if len(cfg.Backends) != 1 {
+		t.Fatalf("expected 1 backend, got %d", len(cfg.Backends))
+	}
+	if cfg.Backends[0].ID != "foo" {
+		t.Errorf("expected backend id to be 'foo', got %q", cfg.Backends[0].ID)
 	}
 }
