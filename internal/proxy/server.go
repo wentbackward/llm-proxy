@@ -297,9 +297,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 // proxyRequest is the shared reverse-proxy pipeline used by all endpoints.
 func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxyOpts) {
 	rid := requestID()
-	// Strip /v1/ prefix from the incoming path. The proxy convention is that
-	// clients send /v1/...; the base_url owns the version segment.
-	r.URL.Path = strings.Replace(r.URL.Path, "/v1/", "/", 1)
+	// The incoming path (e.g. /v1/chat/completions) is forwarded as-is to the
+	// backend. Proper URL resolution (ResolveReference) in the director handles
+	// combining it with the base_url's path component.
 	// If pathOverride is set, use it instead (e.g. /completions, /embeddings).
 	if opts.pathOverride != "" {
 		r.URL.Path = opts.pathOverride
@@ -611,7 +611,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			if s.balancer != nil {
 				s.balancer.CompleteAndDecr(backendID, false, false, 0)
 			}
-			upstreamURL := targetURL.String() + r.URL.Path
+			upstreamURL := targetURL.ResolveReference(&url.URL{Path: r.URL.Path}).String()
 			logger.Request("[%s] %s %s model=%s backend=%s url=%s status=502 dur=%.3fs ERROR: %v",
 				rid, r.Method, r.URL.Path, modelName, backendID, upstreamURL, elapsed, err)
 			log.Printf("[proxy] upstream error backend=%s: %v", backendID, err)
@@ -738,10 +738,16 @@ func director(target *url.URL, backend *config.Backend, body []byte, pathOverrid
 		if pathOverride != "" {
 			endpointPath = pathOverride
 		}
-		// Prepend the base_url's path component (e.g. /v1) to the endpoint path.
-		// Note: the incoming /v1/ prefix is stripped at line ~302, so this
-		// reconstructs the full API path (e.g. "/v1" + "/chat/completions").
-		req.URL.Path = target.Path + endpointPath
+		// Combine the base_url's path with the endpoint path using RFC 3986.
+		// Absolute paths (starting with "/") replace the base path entirely.
+		// Users should configure base_url with a trailing slash (e.g. "http://host:port/v1/")
+		// so that relative resolution appends correctly.
+		ref, err := url.Parse(endpointPath)
+		if err != nil {
+			req.URL.Path = endpointPath // fallback
+		} else {
+			req.URL.Path = target.ResolveReference(ref).Path
+		}
 		// Auth headers — auth_type overrides the default for the backend type.
 		// Default: "x-api-key" for anthropic, "bearer" for openai.
 		// Explicit "bearer" is needed for OAuth tokens on Anthropic.
@@ -1271,7 +1277,7 @@ func logNonStreamingResponse(rid string, data []byte, backendType string) {
 	}
 }
 
-// handleCompletions forwards /v1/completions requests to the backend's /completions
+// handleCompletions forwards /v1/completions requests to the backend's /v1/completions
 // endpoint using the same reverse-proxy infrastructure as
 // handleProxy. FIM tokens pass through untouched — no format translation.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
@@ -1280,19 +1286,19 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.proxyRequest(w, r, proxyOpts{
-		pathOverride: "/completions",
+		pathOverride: "/v1/completions",
 		protocol:     "openai",
 	})
 }
 
-// handleEmbeddings forwards /v1/embeddings requests to the backend's /embeddings endpoint.
+// handleEmbeddings forwards /v1/embeddings requests to the backend's /v1/embeddings endpoint.
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	s.proxyRequest(w, r, proxyOpts{
-		pathOverride: "/embeddings",
+		pathOverride: "/v1/embeddings",
 		protocol:     "openai",
 	})
 }

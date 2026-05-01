@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -208,7 +209,12 @@ func probeBackends(cfg *config.Config) {
 			continue
 		}
 
-		probeURL := b.BaseURL + "/models"
+		base, err := url.Parse(b.BaseURL)
+		if err != nil {
+			log.Printf("[probe] backend %-12s ERROR parsing URL: %v", b.ID, err)
+			continue
+		}
+		probeURL := base.ResolveReference(&url.URL{Path: "/models"}).String()
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, probeURL, http.NoBody)
 		if err != nil {
 			log.Printf("[probe] backend %-12s ERROR building request: %v", b.ID, err)

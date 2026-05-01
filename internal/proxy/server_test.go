@@ -116,7 +116,7 @@ func newTestServer(t *testing.T, capture *capturedRequest) (srv *Server, backend
 	cfg := &config.Config{
 		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
-			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1", TimeoutSeconds: 30},
+			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1/", TimeoutSeconds: 30},
 		},
 		Routes: []config.Route{
 			{VirtualModel: "test-model", Backend: "test", RealModel: "test-model"},
@@ -400,7 +400,7 @@ func TestCompletions_BackendError(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
-			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1", TimeoutSeconds: 30},
+			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1/", TimeoutSeconds: 30},
 		},
 		Routes: []config.Route{
 			{VirtualModel: "test-model", Backend: "test", RealModel: "test-model"},
@@ -568,7 +568,7 @@ func TestSemaphore_LimitsConcurrency(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{PassthroughUnrouted: true},
 		Backends: []config.Backend{
-			{ID: "limited", Type: "openai", BaseURL: backend.URL + "/v1", TimeoutSeconds: 30, MaxConcurrency: 2},
+			{ID: "limited", Type: "openai", BaseURL: backend.URL + "/v1/", TimeoutSeconds: 30, MaxConcurrency: 2},
 		},
 		Routes: []config.Route{
 			{VirtualModel: "test-model", Backend: "limited", RealModel: "test-model"},
@@ -1391,7 +1391,7 @@ func TestDropEmptyMessages_Integration_GlobalEnabled(t *testing.T) {
 			DropEmptyContent:    trueVal,
 		},
 		Backends: []config.Backend{
-			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1"},
+			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1/"},
 		},
 	}
 	metrics, _, _ := telemetry.Init()

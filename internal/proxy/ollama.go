@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/wentbackward/hikyaku/internal/config"
 )
@@ -71,7 +72,12 @@ func (s *Server) handleOllamaTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upURL := backend.BaseURL + "/api/tags"
+	base, err := url.Parse(backend.BaseURL)
+	if err != nil {
+		jsonError(w, "invalid backend URL: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	upURL := base.ResolveReference(&url.URL{Path: "/api/tags"}).String()
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, http.NoBody)
 	if err != nil {
 		jsonError(w, "failed to build upstream request: "+err.Error(), http.StatusInternalServerError)
