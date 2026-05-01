@@ -739,6 +739,8 @@ func director(target *url.URL, backend *config.Backend, body []byte, pathOverrid
 			endpointPath = pathOverride
 		}
 		// Prepend the base_url's path component (e.g. /v1) to the endpoint path.
+		// Note: the incoming /v1/ prefix is stripped at line ~302, so this
+		// reconstructs the full API path (e.g. "/v1" + "/chat/completions").
 		req.URL.Path = target.Path + endpointPath
 		// Auth headers — auth_type overrides the default for the backend type.
 		// Default: "x-api-key" for anthropic, "bearer" for openai.
