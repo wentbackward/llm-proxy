@@ -76,6 +76,30 @@ backends:
     timeout_seconds: 300
 ```
 
+You can also use map syntax, where the key becomes the `id`:
+
+```yaml
+backends:
+  my-vllm:
+    type: openai
+    base_url: "http://gpu-server:8000"
+    api_key: "${VLLM_API_KEY}"
+    timeout_seconds: 300
+
+  anthropic:
+    type: anthropic
+    base_url: "https://api.anthropic.com"
+    api_key: "${ANTHROPIC_API_KEY}"
+    skip_probe: true
+
+  ollama:
+    type: ollama
+    base_url: "http://localhost:11434"
+    timeout_seconds: 300
+```
+
+Both formats produce identical results. If you specify an explicit `id` inside the map value, it takes precedence over the map key. The `id` and `type` fields are still required in both cases.
+
 - **`type`** — `openai`, `anthropic`, or `ollama`. Determines auth header format, stream parsing, and `enable_thinking` translation. Must match the protocol the client speaks: OpenAI format (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) routes to `openai` backends; Anthropic format (`/v1/messages`) routes to `anthropic` backends; Ollama-native format (`/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`, `/api/tags`) routes to `ollama` backends.
 - **`base_url`** — the full base URL for the backend. Include any version or path segments (e.g. `https://api.openai.com/v1/`, `https://api.novita.ai/openai/v1/`, `http://gpu-server:8000/v1/`).
   
@@ -178,6 +202,25 @@ routes:
     clamp:
       enable_thinking: true       # caller cannot override this
 ```
+
+Like backends and groups, routes support map syntax where the key becomes the `virtual_model`:
+
+```yaml
+routes:
+  my-fast:
+    backend: my-vllm
+    real_model: "Qwen/Qwen3.5-9B"
+    defaults:
+      temperature: 0.7
+
+  my-coder:
+    backend: my-vllm
+    real_model: "Qwen/Qwen3.5-9B"
+    defaults:
+      temperature: 0.2
+```
+
+An explicit `virtual_model` inside the map value overrides the map key. Both formats can be used interchangeably.
 
 ### Virtual models
 

@@ -91,6 +91,22 @@ backends:
     skip_probe: true
 ```
 
+Map syntax is also supported — the key becomes the `id` (same for `routes` → `virtual_model`):
+
+```yaml
+backends:
+  local:
+    type: openai
+    base_url: "http://gpu-server:8000/v1/"
+  hf:
+    type: openai
+    base_url: "https://router.huggingface.co/v1/"
+    api_key: "${HF_TOKEN}"
+    skip_probe: true
+```
+
+Both formats produce identical results. An explicit `id` / `virtual_model` inside the map value takes precedence over the map key.
+
 **URL resolution (RFC 3986).** The proxy combines `base_url` with the request path using standard URL resolution ([RFC 3986 §5.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.2)). Include a trailing slash on `base_url` when your backend uses a path prefix (e.g. `"http://host:port/v1/"`) so that relative resolution appends correctly. The incoming request path from the client is forwarded verbatim — the proxy does not manipulate it.
 
 Secrets use `${ENV_VAR}` syntax — resolved at startup, never stored in config. Hot-reload with `SIGHUP` — config, log level, and backend probes update without restart.

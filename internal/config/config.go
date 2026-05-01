@@ -277,10 +277,25 @@ func normalizeMapToList(yamlText, blockName, keyField string) string {
 			mapKey := valNode.Content[j].Value
 			mapVal := valNode.Content[j+1]
 			entry := &yaml.Node{Kind: yaml.MappingNode}
-			// Insert key field (id or virtual_model)
-			keyFieldNode := &yaml.Node{Kind: yaml.ScalarNode, Value: keyField}
-			keyFieldValue := &yaml.Node{Kind: yaml.ScalarNode, Value: mapKey}
-			entry.Content = append(entry.Content, keyFieldNode, keyFieldValue)
+
+			// Check if key field (id/virtual_model) already exists in the mapping
+			hasKeyField := false
+			if mapVal.Kind == yaml.MappingNode {
+				for k := 0; k < len(mapVal.Content); k += 2 {
+					if mapVal.Content[k].Value == keyField {
+						hasKeyField = true
+						break
+					}
+				}
+			}
+
+			// Insert key field only if not already present
+			if !hasKeyField {
+				keyFieldNode := &yaml.Node{Kind: yaml.ScalarNode, Value: keyField}
+				keyFieldValue := &yaml.Node{Kind: yaml.ScalarNode, Value: mapKey}
+				entry.Content = append(entry.Content, keyFieldNode, keyFieldValue)
+			}
+
 			// Copy remaining fields
 			if mapVal.Kind == yaml.MappingNode {
 				entry.Content = append(entry.Content, mapVal.Content...)

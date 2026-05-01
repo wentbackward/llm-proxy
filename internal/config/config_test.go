@@ -1009,3 +1009,98 @@ backends:
 		t.Errorf("expected backend id to be 'foo', got %q", cfg.Backends[0].ID)
 	}
 }
+
+func TestLoad_MapBackends(t *testing.T) {
+	tmp := writeTemp(t, `
+server:
+  host: "0.0.0.0"
+  port: 4000
+  allow_plaintext: true
+backends:
+  foo:
+    type: openai
+    base_url: "http://localhost:8080/v1/"
+  bar:
+    type: openai
+    base_url: "http://localhost:8081/v1/"
+    skip_probe: true
+routes:
+  - virtual_model: test
+    backend: foo
+`)
+	cfg, err := Load(tmp)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.Backends) != 2 {
+		t.Fatalf("expected 2 backends, got %d", len(cfg.Backends))
+	}
+	_, ok := cfg.backendByID["foo"]
+	if !ok {
+		t.Error("missing backend 'foo'")
+	}
+	_, ok = cfg.backendByID["bar"]
+	if !ok {
+		t.Error("missing backend 'bar'")
+	}
+}
+
+func TestLoad_MapRoutes(t *testing.T) {
+	tmp := writeTemp(t, `
+server:
+  host: "0.0.0.0"
+  port: 4000
+  allow_plaintext: true
+backends:
+  - id: local
+    type: openai
+    base_url: "http://localhost:8080/v1/"
+routes:
+  my-route:
+    backend: local
+    real_model: "some-model"
+  another-route:
+    backend: local
+    real_model: "other-model"
+`)
+	cfg, err := Load(tmp)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(cfg.Routes))
+	}
+	_, ok := cfg.routeByModel["my-route"]
+	if !ok {
+		t.Error("missing route 'my-route'")
+	}
+	_, ok = cfg.routeByModel["another-route"]
+	if !ok {
+		t.Error("missing route 'another-route'")
+	}
+}
+
+func TestLoad_MapBackendWithExplicitId(t *testing.T) {
+	tmp := writeTemp(t, `
+server:
+  host: "0.0.0.0"
+  port: 4000
+  allow_plaintext: true
+backends:
+  map-key:
+    id: explicit-id
+    type: openai
+    base_url: "http://localhost:8080/v1/"
+`)
+	cfg, err := Load(tmp)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.Backends) != 1 {
+		t.Fatalf("expected 1 backend, got %d", len(cfg.Backends))
+	}
+	// Explicit id in the map value takes precedence over the map key
+	if cfg.Backends[0].ID != "explicit-id" {
+		t.Errorf("expected backend id 'explicit-id', got %q", cfg.Backends[0].ID)
+	}
+}

@@ -47,6 +47,21 @@ sig_message_capture:
   #   → captures next max_messages requests, then auto-closes the window
 
 # Upstream LLM providers
+# List and map syntax are both supported. Map key becomes the id.
+# See docs/configuration.md for details.
+#
+# Map equivalent (produces identical config):
+# backends:
+#   vllm-27b:
+#     type: openai
+#     base_url: "http://localhost:3022"
+#     api_key: "${VLLM_API_KEY}"
+#     timeout_seconds: 300
+#     default: true
+#   vllm-9b:
+#     type: openai
+#     base_url: "http://localhost:3009"
+#     timeout_seconds: 120
 backends:
   - id: vllm-27b
     type: openai          # openai | anthropic
