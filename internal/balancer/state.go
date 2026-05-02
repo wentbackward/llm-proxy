@@ -20,6 +20,7 @@ type BackendState struct {
 	Healthy             bool
 	ConsecutiveFailures int
 	LastHealthCheck     time.Time
+	LastSuccessAt       time.Time // when the last successful request completed
 
 	// Recovery state (protected by mu)
 	RampingUp          bool
@@ -143,6 +144,7 @@ func (b *BackendState) RecordRequestOutcome(success bool, unhealthyAfter, rampUp
 
 	if success {
 		b.ConsecutiveFailures = 0
+		b.LastSuccessAt = time.Now()
 		if !b.Healthy {
 			b.Healthy = true
 			if rampUpSeconds > 0 {

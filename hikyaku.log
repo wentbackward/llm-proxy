@@ -1,0 +1,500 @@
+2026/05/02 21:32:20 [hdr] [19ea21db]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:32:20 [hdr] [19ea21db]   X-Stainless-Os: Linux
+2026/05/02 21:32:20 [hdr] [19ea21db]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:32:20 [hdr] [19ea21db]   Sec-Fetch-Mode: cors
+2026/05/02 21:32:20 [hdr] [19ea21db]   Content-Length: 438940
+2026/05/02 21:32:20 [hdr] [19ea21db]   X-Stainless-Lang: js
+2026/05/02 21:32:20 [hdr] [19ea21db]   X-Stainless-Runtime: node
+2026/05/02 21:32:20 [hdr] [19ea21db]   Content-Type: application/json
+2026/05/02 21:32:20 [hdr] [19ea21db]   Accept-Language: *
+2026/05/02 21:32:20 [hdr] [19ea21db]   Connection: keep-alive
+2026/05/02 21:32:20 [hdr] [19ea21db]   Accept: application/json
+2026/05/02 21:32:20 [hdr] [19ea21db]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:32:20 [hdr] [19ea21db]   Accept-Encoding: gzip, deflate
+2026/05/02 21:32:20 [body] [19ea21db] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:32:20 [lb] group code-cluster         → port-3041            (pool=1, affinity=e7e104384c83ebf2)
+2026/05/02 21:32:20 [hdr] [19ea21db] → backend=port-3041 target=http://spark-01.royal-armadillo.ts.net:3041/v1/ model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 auth=none params=map[enable_thinking:true max_completion_tokens:16834 max_tokens:16384 presence_penalty:0.1 repetition_penalty:1.1 temperature:0.6 top_k:20 top_p:0.95]
+2026/05/02 21:32:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:32:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:32:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:32:29 [req] [19ea21db] POST /v1/chat/completions model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 backend=port-3041 status=200 dur=9.578s stream=true
+2026/05/02 21:32:53 [lb] backend port-3041-rr         UNHEALTHY (failures=59)
+2026/05/02 21:32:53 [lb] backend port-3041            UNHEALTHY (failures=59)
+2026/05/02 21:32:53 [lb] backend port-3042            UNHEALTHY (failures=59)
+2026/05/02 21:32:53 [lb] backend port-3042-rr         UNHEALTHY (failures=59)
+2026/05/02 21:33:13 [hdr] [1f349df1] POST /v1/chat/completions
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Arch: x64
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Runtime: node
+2026/05/02 21:33:13 [hdr] [1f349df1]   Authorization: Bearer boogie
+2026/05/02 21:33:13 [hdr] [1f349df1]   Accept-Language: *
+2026/05/02 21:33:13 [hdr] [1f349df1]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:13 [hdr] [1f349df1]   Connection: keep-alive
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Retry-Count: 0
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Timeout: 600
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Lang: js
+2026/05/02 21:33:13 [hdr] [1f349df1]   Accept: application/json
+2026/05/02 21:33:13 [hdr] [1f349df1]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:13 [hdr] [1f349df1]   X-Stainless-Os: Linux
+2026/05/02 21:33:13 [hdr] [1f349df1]   Content-Type: application/json
+2026/05/02 21:33:13 [hdr] [1f349df1]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:13 [hdr] [1f349df1]   Content-Length: 439395
+2026/05/02 21:33:13 [body] [1f349df1] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:13 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:14 [hdr] [82fdee69] POST /v1/chat/completions
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:14 [hdr] [82fdee69]   Connection: keep-alive
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Lang: js
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Os: Linux
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:14 [hdr] [82fdee69]   Authorization: Bearer boogie
+2026/05/02 21:33:14 [hdr] [82fdee69]   Accept-Language: *
+2026/05/02 21:33:14 [hdr] [82fdee69]   Content-Length: 439395
+2026/05/02 21:33:14 [hdr] [82fdee69]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Arch: x64
+2026/05/02 21:33:14 [hdr] [82fdee69]   Content-Type: application/json
+2026/05/02 21:33:14 [hdr] [82fdee69]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:14 [hdr] [82fdee69]   Accept: application/json
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Retry-Count: 1
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Runtime: node
+2026/05/02 21:33:14 [hdr] [82fdee69]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:14 [hdr] [82fdee69]   X-Stainless-Timeout: 600
+2026/05/02 21:33:14 [body] [82fdee69] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:14 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:15 [hdr] [a533dad9] POST /v1/chat/completions
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Os: Linux
+2026/05/02 21:33:15 [hdr] [a533dad9]   Authorization: Bearer boogie
+2026/05/02 21:33:15 [hdr] [a533dad9]   Connection: keep-alive
+2026/05/02 21:33:15 [hdr] [a533dad9]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Lang: js
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Runtime: node
+2026/05/02 21:33:15 [hdr] [a533dad9]   Accept-Language: *
+2026/05/02 21:33:15 [hdr] [a533dad9]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:15 [hdr] [a533dad9]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Timeout: 600
+2026/05/02 21:33:15 [hdr] [a533dad9]   Content-Type: application/json
+2026/05/02 21:33:15 [hdr] [a533dad9]   Content-Length: 439395
+2026/05/02 21:33:15 [hdr] [a533dad9]   Accept: application/json
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Retry-Count: 2
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Arch: x64
+2026/05/02 21:33:15 [hdr] [a533dad9]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:15 [body] [a533dad9] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:15 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:17 [hdr] [6312afb7] POST /v1/chat/completions
+2026/05/02 21:33:17 [hdr] [6312afb7]   Connection: keep-alive
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Retry-Count: 3
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Runtime: node
+2026/05/02 21:33:17 [hdr] [6312afb7]   Content-Type: application/json
+2026/05/02 21:33:17 [hdr] [6312afb7]   Accept-Language: *
+2026/05/02 21:33:17 [hdr] [6312afb7]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:17 [hdr] [6312afb7]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Os: Linux
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Arch: x64
+2026/05/02 21:33:17 [hdr] [6312afb7]   Authorization: Bearer boogie
+2026/05/02 21:33:17 [hdr] [6312afb7]   Content-Length: 439395
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Timeout: 600
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:17 [hdr] [6312afb7]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:17 [hdr] [6312afb7]   Accept: application/json
+2026/05/02 21:33:17 [hdr] [6312afb7]   X-Stainless-Lang: js
+2026/05/02 21:33:17 [body] [6312afb7] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:17 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:19 [hdr] [2eccf2eb] POST /v1/chat/completions
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Accept: application/json
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Retry-Count: 0
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Content-Length: 439395
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Connection: keep-alive
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Arch: x64
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Lang: js
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Runtime: node
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Authorization: Bearer boogie
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Content-Type: application/json
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Accept-Language: *
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Timeout: 600
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   X-Stainless-Os: Linux
+2026/05/02 21:33:19 [hdr] [2eccf2eb]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:19 [body] [2eccf2eb] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:19 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:19 [hdr] [c97564d4] POST /v1/chat/completions
+2026/05/02 21:33:19 [hdr] [c97564d4]   Accept: application/json
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Os: Linux
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Runtime: node
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:19 [hdr] [c97564d4]   Authorization: Bearer boogie
+2026/05/02 21:33:19 [hdr] [c97564d4]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Retry-Count: 1
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Arch: x64
+2026/05/02 21:33:19 [hdr] [c97564d4]   Content-Type: application/json
+2026/05/02 21:33:19 [hdr] [c97564d4]   Accept-Language: *
+2026/05/02 21:33:19 [hdr] [c97564d4]   Content-Length: 439395
+2026/05/02 21:33:19 [hdr] [c97564d4]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:19 [hdr] [c97564d4]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:19 [hdr] [c97564d4]   Connection: keep-alive
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Timeout: 600
+2026/05/02 21:33:19 [hdr] [c97564d4]   X-Stainless-Lang: js
+2026/05/02 21:33:19 [body] [c97564d4] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:19 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:20 [hdr] [e7e80680] POST /v1/chat/completions
+2026/05/02 21:33:20 [hdr] [e7e80680]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:20 [hdr] [e7e80680]   Connection: keep-alive
+2026/05/02 21:33:20 [hdr] [e7e80680]   Accept: application/json
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Lang: js
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Runtime: node
+2026/05/02 21:33:20 [hdr] [e7e80680]   Authorization: Bearer boogie
+2026/05/02 21:33:20 [hdr] [e7e80680]   Content-Length: 439395
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Os: Linux
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:20 [hdr] [e7e80680]   Content-Type: application/json
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Retry-Count: 2
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Arch: x64
+2026/05/02 21:33:20 [hdr] [e7e80680]   Accept-Language: *
+2026/05/02 21:33:20 [hdr] [e7e80680]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:20 [hdr] [e7e80680]   X-Stainless-Timeout: 600
+2026/05/02 21:33:20 [hdr] [e7e80680]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:20 [body] [e7e80680] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:20 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:22 [hdr] [8a60661e] POST /v1/chat/completions
+2026/05/02 21:33:22 [hdr] [8a60661e]   Connection: keep-alive
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Timeout: 600
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Lang: js
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Os: Linux
+2026/05/02 21:33:22 [hdr] [8a60661e]   Authorization: Bearer boogie
+2026/05/02 21:33:22 [hdr] [8a60661e]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:22 [hdr] [8a60661e]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Runtime: node
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:22 [hdr] [8a60661e]   Accept-Language: *
+2026/05/02 21:33:22 [hdr] [8a60661e]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Arch: x64
+2026/05/02 21:33:22 [hdr] [8a60661e]   Accept: application/json
+2026/05/02 21:33:22 [hdr] [8a60661e]   X-Stainless-Retry-Count: 3
+2026/05/02 21:33:22 [hdr] [8a60661e]   Content-Type: application/json
+2026/05/02 21:33:22 [hdr] [8a60661e]   Content-Length: 439395
+2026/05/02 21:33:22 [body] [8a60661e] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:22 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:33:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:33:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:33:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:33:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:33:26 [hdr] [cd31ce38] POST /v1/chat/completions
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Connection: keep-alive
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Accept: application/json
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Retry-Count: 0
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Os: Linux
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:26 [hdr] [cd31ce38]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Timeout: 600
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Arch: x64
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Runtime: node
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Content-Length: 439395
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Lang: js
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:26 [hdr] [cd31ce38]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Authorization: Bearer boogie
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Accept-Language: *
+2026/05/02 21:33:26 [hdr] [cd31ce38]   Content-Type: application/json
+2026/05/02 21:33:26 [body] [cd31ce38] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:26 [lb] group code-cluster         → port-3041            (pool=2, affinity=e7e104384c83ebf2)
+2026/05/02 21:33:26 [hdr] [cd31ce38] → backend=port-3041 target=http://spark-01.royal-armadillo.ts.net:3041/v1/ model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 auth=none params=map[enable_thinking:true max_completion_tokens:16834 max_tokens:16384 presence_penalty:0.1 repetition_penalty:1.1 temperature:0.6 top_k:20 top_p:0.95]
+2026/05/02 21:33:40 [req] [cd31ce38] POST /v1/chat/completions model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 backend=port-3041 status=200 dur=13.611s stream=true
+2026/05/02 21:33:42 [hdr] [2df18aed] POST /v1/chat/completions
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Timeout: 600
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Os: Linux
+2026/05/02 21:33:42 [hdr] [2df18aed]   Content-Length: 440596
+2026/05/02 21:33:42 [hdr] [2df18aed]   Connection: keep-alive
+2026/05/02 21:33:42 [hdr] [2df18aed]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Retry-Count: 0
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Lang: js
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:33:42 [hdr] [2df18aed]   Content-Type: application/json
+2026/05/02 21:33:42 [hdr] [2df18aed]   Accept: application/json
+2026/05/02 21:33:42 [hdr] [2df18aed]   Authorization: Bearer boogie
+2026/05/02 21:33:42 [hdr] [2df18aed]   Accept-Language: *
+2026/05/02 21:33:42 [hdr] [2df18aed]   Sec-Fetch-Mode: cors
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Arch: x64
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Runtime: node
+2026/05/02 21:33:42 [hdr] [2df18aed]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:33:42 [hdr] [2df18aed]   Accept-Encoding: gzip, deflate
+2026/05/02 21:33:42 [body] [2df18aed] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:33:42 [lb] group code-cluster         → port-3041            (pool=2, affinity=e7e104384c83ebf2)
+2026/05/02 21:33:42 [hdr] [2df18aed] → backend=port-3041 target=http://spark-01.royal-armadillo.ts.net:3041/v1/ model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 auth=none params=map[enable_thinking:true max_completion_tokens:16834 max_tokens:16384 presence_penalty:0.1 repetition_penalty:1.1 temperature:0.6 top_k:20 top_p:0.95]
+2026/05/02 21:33:53 [req] [2df18aed] POST /v1/chat/completions model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 backend=port-3041 status=200 dur=10.866s stream=true
+2026/05/02 21:33:53 [lb] backend port-3041-rr         UNHEALTHY (failures=60)
+2026/05/02 21:33:53 [lb] backend port-3041            UNHEALTHY (failures=60)
+2026/05/02 21:33:53 [lb] backend port-3042-rr         UNHEALTHY (failures=60)
+2026/05/02 21:33:53 [lb] backend port-3042            UNHEALTHY (failures=60)
+2026/05/02 21:34:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:34:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:34:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:34:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:34:53 [lb] backend port-3041-rr         UNHEALTHY (failures=61)
+2026/05/02 21:34:53 [lb] backend port-3041            UNHEALTHY (failures=61)
+2026/05/02 21:34:53 [lb] backend port-3042            UNHEALTHY (failures=61)
+2026/05/02 21:34:53 [lb] backend port-3042-rr         UNHEALTHY (failures=61)
+2026/05/02 21:35:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:35:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:35:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:35:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:35:53 [lb] backend port-3041            UNHEALTHY (failures=62)
+2026/05/02 21:35:53 [lb] backend port-3041-rr         UNHEALTHY (failures=62)
+2026/05/02 21:35:53 [lb] backend port-3042-rr         UNHEALTHY (failures=62)
+2026/05/02 21:35:53 [lb] backend port-3042            UNHEALTHY (failures=62)
+2026/05/02 21:36:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:36:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:36:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:36:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:36:53 [lb] backend port-3041            UNHEALTHY (failures=63)
+2026/05/02 21:36:53 [lb] backend port-3041-rr         UNHEALTHY (failures=63)
+2026/05/02 21:36:53 [lb] backend port-3042            UNHEALTHY (failures=63)
+2026/05/02 21:36:53 [lb] backend port-3042-rr         UNHEALTHY (failures=63)
+2026/05/02 21:37:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:37:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:37:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:37:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:37:53 [lb] backend port-3041-rr         UNHEALTHY (failures=64)
+2026/05/02 21:37:53 [lb] backend port-3041            UNHEALTHY (failures=64)
+2026/05/02 21:37:53 [lb] backend port-3042-rr         UNHEALTHY (failures=64)
+2026/05/02 21:37:53 [lb] backend port-3042            UNHEALTHY (failures=64)
+2026/05/02 21:38:12 [hdr] [adaeb815] POST /v1/chat/completions
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Runtime: node
+2026/05/02 21:38:12 [hdr] [adaeb815]   Connection: keep-alive
+2026/05/02 21:38:12 [hdr] [adaeb815]   Accept: application/json
+2026/05/02 21:38:12 [hdr] [adaeb815]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Retry-Count: 0
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Timeout: 600
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Os: Linux
+2026/05/02 21:38:12 [hdr] [adaeb815]   Authorization: Bearer boogie
+2026/05/02 21:38:12 [hdr] [adaeb815]   Content-Type: application/json
+2026/05/02 21:38:12 [hdr] [adaeb815]   Content-Length: 441278
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:12 [hdr] [adaeb815]   Accept-Language: *
+2026/05/02 21:38:12 [hdr] [adaeb815]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:12 [hdr] [adaeb815]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Lang: js
+2026/05/02 21:38:12 [hdr] [adaeb815]   X-Stainless-Arch: x64
+2026/05/02 21:38:12 [body] [adaeb815] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:12 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:13 [hdr] [7701f5e4] POST /v1/chat/completions
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Connection: keep-alive
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Authorization: Bearer boogie
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Os: Linux
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Content-Type: application/json
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Accept: application/json
+2026/05/02 21:38:13 [hdr] [7701f5e4]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Lang: js
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Arch: x64
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Retry-Count: 1
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Timeout: 600
+2026/05/02 21:38:13 [hdr] [7701f5e4]   X-Stainless-Runtime: node
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Accept-Language: *
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:13 [hdr] [7701f5e4]   Content-Length: 441278
+2026/05/02 21:38:13 [body] [7701f5e4] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:13 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:14 [hdr] [204c7d39] POST /v1/chat/completions
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Os: Linux
+2026/05/02 21:38:14 [hdr] [204c7d39]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Retry-Count: 2
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Arch: x64
+2026/05/02 21:38:14 [hdr] [204c7d39]   Content-Type: application/json
+2026/05/02 21:38:14 [hdr] [204c7d39]   Accept-Language: *
+2026/05/02 21:38:14 [hdr] [204c7d39]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:14 [hdr] [204c7d39]   Connection: keep-alive
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Lang: js
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Runtime: node
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:14 [hdr] [204c7d39]   Authorization: Bearer boogie
+2026/05/02 21:38:14 [hdr] [204c7d39]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:14 [hdr] [204c7d39]   Content-Length: 441278
+2026/05/02 21:38:14 [hdr] [204c7d39]   Accept: application/json
+2026/05/02 21:38:14 [hdr] [204c7d39]   X-Stainless-Timeout: 600
+2026/05/02 21:38:14 [body] [204c7d39] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:14 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:16 [hdr] [ae1b1de3] POST /v1/chat/completions
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Accept: application/json
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Arch: x64
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Runtime: node
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Authorization: Bearer boogie
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Content-Length: 441278
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Accept-Language: *
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Connection: keep-alive
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Retry-Count: 3
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Lang: js
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Timeout: 600
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Os: Linux
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:16 [hdr] [ae1b1de3]   Content-Type: application/json
+2026/05/02 21:38:16 [body] [ae1b1de3] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:16 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:18 [hdr] [48cdaff4] POST /v1/chat/completions
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Retry-Count: 0
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Runtime: node
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Content-Type: application/json
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Timeout: 600
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Lang: js
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Accept: application/json
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Os: Linux
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Accept-Language: *
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Connection: keep-alive
+2026/05/02 21:38:18 [hdr] [48cdaff4]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:18 [hdr] [48cdaff4]   X-Stainless-Arch: x64
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Authorization: Bearer boogie
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:18 [hdr] [48cdaff4]   Content-Length: 441278
+2026/05/02 21:38:18 [body] [48cdaff4] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:18 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:18 [hdr] [e4624e5f] POST /v1/chat/completions
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Connection: keep-alive
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Accept: application/json
+2026/05/02 21:38:18 [hdr] [e4624e5f]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Retry-Count: 1
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Os: Linux
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Content-Type: application/json
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Accept-Language: *
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Arch: x64
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Content-Length: 441278
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Timeout: 600
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Runtime: node
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Authorization: Bearer boogie
+2026/05/02 21:38:18 [hdr] [e4624e5f]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:18 [hdr] [e4624e5f]   X-Stainless-Lang: js
+2026/05/02 21:38:18 [body] [e4624e5f] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:18 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:19 [hdr] [45adadf9] POST /v1/chat/completions
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Retry-Count: 2
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Lang: js
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Arch: x64
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Runtime: node
+2026/05/02 21:38:19 [hdr] [45adadf9]   Authorization: Bearer boogie
+2026/05/02 21:38:19 [hdr] [45adadf9]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:19 [hdr] [45adadf9]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:19 [hdr] [45adadf9]   Connection: keep-alive
+2026/05/02 21:38:19 [hdr] [45adadf9]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Timeout: 600
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Os: Linux
+2026/05/02 21:38:19 [hdr] [45adadf9]   Content-Type: application/json
+2026/05/02 21:38:19 [hdr] [45adadf9]   Accept-Language: *
+2026/05/02 21:38:19 [hdr] [45adadf9]   Accept: application/json
+2026/05/02 21:38:19 [hdr] [45adadf9]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:19 [hdr] [45adadf9]   Content-Length: 441278
+2026/05/02 21:38:19 [body] [45adadf9] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:19 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:21 [hdr] [c5c9c9bb] POST /v1/chat/completions
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Content-Length: 441278
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Arch: x64
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Authorization: Bearer boogie
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Connection: keep-alive
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Os: Linux
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Runtime: node
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Lang: js
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Content-Type: application/json
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Accept-Language: *
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Accept: application/json
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Retry-Count: 3
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Timeout: 600
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:21 [hdr] [c5c9c9bb]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:21 [body] [c5c9c9bb] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:21 [lb] group code-cluster         NO HEALTHY BACKENDS (pool=0/2)
+2026/05/02 21:38:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:38:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:38:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:38:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:38:25 [hdr] [1db48109] POST /v1/chat/completions
+2026/05/02 21:38:25 [hdr] [1db48109]   Content-Type: application/json
+2026/05/02 21:38:25 [hdr] [1db48109]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:25 [hdr] [1db48109]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Arch: x64
+2026/05/02 21:38:25 [hdr] [1db48109]   Content-Length: 441278
+2026/05/02 21:38:25 [hdr] [1db48109]   Connection: keep-alive
+2026/05/02 21:38:25 [hdr] [1db48109]   Accept: application/json
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Os: Linux
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:25 [hdr] [1db48109]   Accept-Language: *
+2026/05/02 21:38:25 [hdr] [1db48109]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Retry-Count: 0
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Runtime: node
+2026/05/02 21:38:25 [hdr] [1db48109]   Authorization: Bearer boogie
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Timeout: 600
+2026/05/02 21:38:25 [hdr] [1db48109]   X-Stainless-Lang: js
+2026/05/02 21:38:25 [body] [1db48109] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:25 [lb] group code-cluster         → port-3041            (pool=2, affinity=e7e104384c83ebf2)
+2026/05/02 21:38:25 [hdr] [1db48109] → backend=port-3041 target=http://spark-01.royal-armadillo.ts.net:3041/v1/ model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 auth=none params=map[enable_thinking:true max_completion_tokens:16834 max_tokens:16384 presence_penalty:0.1 repetition_penalty:1.1 temperature:0.6 top_k:20 top_p:0.95]
+2026/05/02 21:38:34 [req] [1db48109] POST /v1/chat/completions model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 backend=port-3041 status=200 dur=9.010s stream=true
+2026/05/02 21:38:35 [hdr] [caf29192] POST /v1/chat/completions
+2026/05/02 21:38:35 [hdr] [caf29192]   Accept: application/json
+2026/05/02 21:38:35 [hdr] [caf29192]   User-Agent: OpenAI/JS 6.26.0
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Timeout: 600
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Lang: js
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Package-Version: 6.26.0
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Runtime-Version: v24.15.0
+2026/05/02 21:38:35 [hdr] [caf29192]   Authorization: Bearer boogie
+2026/05/02 21:38:35 [hdr] [caf29192]   Content-Type: application/json
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Retry-Count: 0
+2026/05/02 21:38:35 [hdr] [caf29192]   Connection: keep-alive
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Os: Linux
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Arch: x64
+2026/05/02 21:38:35 [hdr] [caf29192]   Accept-Language: *
+2026/05/02 21:38:35 [hdr] [caf29192]   Accept-Encoding: gzip, deflate
+2026/05/02 21:38:35 [hdr] [caf29192]   Content-Length: 441814
+2026/05/02 21:38:35 [hdr] [caf29192]   X-Stainless-Runtime: node
+2026/05/02 21:38:35 [hdr] [caf29192]   Sec-Fetch-Mode: cors
+2026/05/02 21:38:35 [body] [caf29192] POST /v1/chat/completions body: {"model":"gresh-coder","messages":[{"role":"system","content":"You are an expert
+2026/05/02 21:38:35 [lb] group code-cluster         → port-3041            (pool=2, affinity=e7e104384c83ebf2)
+2026/05/02 21:38:35 [hdr] [caf29192] → backend=port-3041 target=http://spark-01.royal-armadillo.ts.net:3041/v1/ model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 auth=none params=map[enable_thinking:true max_completion_tokens:16834 max_tokens:16384 presence_penalty:0.1 repetition_penalty:1.1 temperature:0.6 top_k:20 top_p:0.95]
+2026/05/02 21:38:37 [req] [caf29192] POST /v1/chat/completions model=gresh-coder→Qwen/Qwen3.6-27B-AWQ-INT4 backend=port-3041 status=200 dur=1.908s stream=true
+2026/05/02 21:38:53 [lb] backend port-3041            UNHEALTHY (failures=65)
+2026/05/02 21:38:53 [lb] backend port-3041-rr         UNHEALTHY (failures=65)
+2026/05/02 21:38:53 [lb] backend port-3042            UNHEALTHY (failures=65)
+2026/05/02 21:38:53 [lb] backend port-3042-rr         UNHEALTHY (failures=65)
+2026/05/02 21:39:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:39:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:39:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:39:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:39:53 [lb] backend port-3041-rr         UNHEALTHY (failures=66)
+2026/05/02 21:39:53 [lb] backend port-3041            UNHEALTHY (failures=66)
+2026/05/02 21:39:53 [lb] backend port-3042            UNHEALTHY (failures=66)
+2026/05/02 21:39:53 [lb] backend port-3042-rr         UNHEALTHY (failures=66)
+2026/05/02 21:40:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:40:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:40:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:40:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:40:53 [lb] backend port-3041            UNHEALTHY (failures=67)
+2026/05/02 21:40:53 [lb] backend port-3041-rr         UNHEALTHY (failures=67)
+2026/05/02 21:40:53 [lb] backend port-3042            UNHEALTHY (failures=67)
+2026/05/02 21:40:53 [lb] backend port-3042-rr         UNHEALTHY (failures=67)
+2026/05/02 21:41:23 [lb] backend port-3041-rr         HEALTHY (ramp-up=0s)
+2026/05/02 21:41:23 [lb] backend port-3041            HEALTHY (ramp-up=0s)
+2026/05/02 21:41:23 [lb] backend port-3042            HEALTHY (ramp-up=0s)
+2026/05/02 21:41:23 [lb] backend port-3042-rr         HEALTHY (ramp-up=0s)

@@ -551,6 +551,14 @@ func (b *Balancer) markUnhealthy(id string, failures int) {
 		if st.InFlight.Load() > 0 {
 			return
 		}
+		// Ground truth: if a real request succeeded recently (within 60s),
+		// the backend is alive. Probe failures are noise. Skip demotion.
+		st.mu.RLock()
+		recentSuccess := time.Since(st.LastSuccessAt) < 60*time.Second
+		st.mu.RUnlock()
+		if recentSuccess {
+			return
+		}
 		wasHealthy := st.IsHealthy()
 		threshold := grp.Cfg.HealthCheck.UnhealthyAfter
 		if threshold == 0 {
