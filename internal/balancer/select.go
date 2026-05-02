@@ -82,9 +82,7 @@ func loadScore(b *BackendState, staleThreshold time.Duration) float64 {
 	if b.Weight > 0 {
 		load /= float64(b.Weight)
 	}
-	// Deterministic tiebreak: hash the ID to [0, 1)
-	tieBreak := float64(fnv64a([]byte(b.ID))%1000) * 1e-6
-	return load + tieBreak
+	return load
 }
 
 // isOverloaded reports whether a backend should be avoided.

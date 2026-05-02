@@ -1,0 +1,105 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1777392774415,
+  "projectRoot": "/home/code/hacking/llm-proxy",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      },
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "bin",
+      "docs"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "bin": {
+      "path": "bin",
+      "purpose": "Executable scripts",
+      "fileCount": 2,
+      "lastAccessed": 1777392774413,
+      "keyFiles": [
+        "llm-proxy",
+        "llm-proxy-hardened"
+      ]
+    },
+    "cmd": {
+      "path": "cmd",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1777392774414,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 8,
+      "lastAccessed": 1777392774414,
+      "keyFiles": [
+        "code-assessment.md",
+        "configuration.md",
+        "development.md",
+        "load-balancing-forward-compat.md",
+        "logging.md"
+      ]
+    },
+    "internal": {
+      "path": "internal",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1777392774414,
+      "keyFiles": []
+    },
+    "internal/config": {
+      "path": "internal/config",
+      "purpose": "Configuration files",
+      "fileCount": 2,
+      "lastAccessed": 1777392774414,
+      "keyFiles": [
+        "config.go",
+        "config_test.go"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
