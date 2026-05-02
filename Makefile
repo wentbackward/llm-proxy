@@ -14,6 +14,18 @@ build-hardened:
 test:
 	go test ./... -v -race -count=1
 
+# Run tests multiple times with the race detector to catch intermittent races.
+# Single runs can miss timing-dependent data races.
+test-race-stress:
+	@pass=0; fail=0; for i in $$(seq 1 20); do \
+		echo "--- run $$i/20 ---"; \
+		if go test ./... -race -count=1 2>&1 | tee /tmp/test-run-$$i.log | grep -q "FAIL"; then \
+			echo "FAILED on run $$i — see /tmp/test-run-$$i.log"; \
+			exit 1; \
+		fi; \
+	done; \
+	echo "All 20 race-detector runs passed"
+
 test-short:
 	go test ./... -short
 
