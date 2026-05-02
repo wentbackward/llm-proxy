@@ -13,7 +13,7 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 echo ">> Building ${IMAGE_NAME}:${VERSION}"
-docker build -t "${IMAGE_NAME}:${VERSION}" .
+docker build --build-arg VERSION="${VERSION}" -t "${IMAGE_NAME}:${VERSION}" .
 
 echo ">> Saving image to tarball"
 docker save "${IMAGE_NAME}:${VERSION}" -o "${TMPDIR}/image.tar"
