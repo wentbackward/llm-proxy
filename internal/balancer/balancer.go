@@ -145,8 +145,24 @@ func (b *Balancer) Select(groupName, key string, ctx *RequestContext) (*BackendS
 	}
 
 	if len(pool) == 0 {
-		log.Printf("[lb] group %-20s NO HEALTHY BACKENDS (pool=%d/%d)", groupName, len(pool), len(grp.States))
-		return nil, ErrNoHealthyBackend
+		// Last resort: include unhealthy backends that have passed the retry delay.
+		// Better to risk one failed request than return 503 to the client.
+		for _, st := range grp.States {
+			if !st.IsHealthy() && st.ShouldRetry(0) {
+				pool = append(pool, st)
+			}
+		}
+		if len(pool) == 0 {
+			// Nothing available — force-include the first backend.
+			// It's been idle and disconnected; the next request will prove it alive (or not).
+			for _, st := range grp.States {
+				pool = append(pool, st)
+				log.Printf("[lb] group %-20s FORCE INCLUDE %-20s (all backends unhealthy, retry delay pending)", groupName, st.ID)
+				break
+			}
+		} else {
+			log.Printf("[lb] group %-20s LAST RESORT: %d unhealthy backend(s) past retry delay", groupName, len(pool))
+		}
 	}
 
 	selected, err := grp.Selector.Select(pool, key, ctx)
@@ -704,7 +720,7 @@ func (b *Balancer) startPassiveRecovery(cfg *config.Config) {
 		recovery := cfg.GetRecovery(info.groups[0])
 		cooldownSec := recovery.RetryDelaySec
 		if cooldownSec <= 0 {
-			cooldownSec = 30
+			cooldownSec = 10
 		}
 		b.wg.Add(1)
 		go b.passiveRecoveryLoop(info.id, time.Duration(cooldownSec)*time.Second, recovery.RampUpSec)
