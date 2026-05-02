@@ -209,8 +209,14 @@ func Load(path string) (*Config, error) {
 
 	// Normalize map-formatted backends/routes to list format.
 	// Allows: backends: {foo: {type: openai, ...}}  →  backends: [{id: foo, type: openai, ...}]
-	expanded = normalizeMapToList(expanded, "backends", "id")
-	expanded = normalizeMapToList(expanded, "routes", "virtual_model")
+	expanded, err = normalizeMapToList(expanded, "backends", "id")
+	if err != nil {
+		return nil, err
+	}
+	expanded, err = normalizeMapToList(expanded, "routes", "virtual_model")
+	if err != nil {
+		return nil, err
+	}
 
 	var cfg Config
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
@@ -252,66 +258,79 @@ func Load(path string) (*Config, error) {
 // E.g. "backends: {foo: {type: openai}}" → "backends: [{id: foo, type: openai}]"
 // Only transforms if the value is a mapping (not a sequence). Preserves
 // list format unchanged. The keyField is inserted into each entry if absent.
-func normalizeMapToList(yamlText, blockName, keyField string) string {
+// Returns an error if the block mixes map and list syntax.
+func normalizeMapToList(yamlText, blockName, keyField string) (string, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(yamlText), &doc); err != nil {
-		return yamlText // if we can't parse, leave it alone
+		return yamlText, fmt.Errorf("normalizeMapToList: parse yaml: %w", err)
 	}
 
 	// The root node is a Document node containing a Mapping node
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return yamlText
+		return yamlText, nil
 	}
 
 	// Find the target block and convert mapping to sequence
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		keyNode := root.Content[i]
 		valNode := root.Content[i+1]
-		if keyNode.Value != blockName || valNode.Kind != yaml.MappingNode {
+		if keyNode.Value != blockName {
 			continue
 		}
-		// Convert mapping to sequence
-		seq := &yaml.Node{Kind: yaml.SequenceNode}
-		for j := 0; j < len(valNode.Content); j += 2 {
-			mapKey := valNode.Content[j].Value
-			mapVal := valNode.Content[j+1]
-			entry := &yaml.Node{Kind: yaml.MappingNode}
 
-			// Check if key field (id/virtual_model) already exists in the mapping
-			hasKeyField := false
-			if mapVal.Kind == yaml.MappingNode {
-				for k := 0; k < len(mapVal.Content); k += 2 {
-					if mapVal.Content[k].Value == keyField {
-						hasKeyField = true
-						break
+		// List format — nothing to do
+		if valNode.Kind == yaml.SequenceNode {
+			continue
+		}
+
+		// Map format — convert to sequence
+		if valNode.Kind == yaml.MappingNode {
+			seq := &yaml.Node{Kind: yaml.SequenceNode}
+			for j := 0; j < len(valNode.Content); j += 2 {
+				mapKey := valNode.Content[j].Value
+				mapVal := valNode.Content[j+1]
+				entry := &yaml.Node{Kind: yaml.MappingNode}
+
+				// Check if key field (id/virtual_model) already exists in the mapping
+				hasKeyField := false
+				if mapVal.Kind == yaml.MappingNode {
+					for k := 0; k < len(mapVal.Content); k += 2 {
+						if mapVal.Content[k].Value == keyField {
+							hasKeyField = true
+							break
+						}
 					}
 				}
-			}
 
-			// Insert key field only if not already present
-			if !hasKeyField {
-				keyFieldNode := &yaml.Node{Kind: yaml.ScalarNode, Value: keyField}
-				keyFieldValue := &yaml.Node{Kind: yaml.ScalarNode, Value: mapKey}
-				entry.Content = append(entry.Content, keyFieldNode, keyFieldValue)
-			}
+				// Insert key field only if not already present
+				if !hasKeyField {
+					keyFieldNode := &yaml.Node{Kind: yaml.ScalarNode, Value: keyField}
+					keyFieldValue := &yaml.Node{Kind: yaml.ScalarNode, Value: mapKey}
+					entry.Content = append(entry.Content, keyFieldNode, keyFieldValue)
+				}
 
-			// Copy remaining fields
-			if mapVal.Kind == yaml.MappingNode {
-				entry.Content = append(entry.Content, mapVal.Content...)
+				// Copy remaining fields
+				if mapVal.Kind == yaml.MappingNode {
+					entry.Content = append(entry.Content, mapVal.Content...)
+				}
+				seq.Content = append(seq.Content, entry)
 			}
-			seq.Content = append(seq.Content, entry)
+			valNode.Kind = seq.Kind
+			valNode.Tag = seq.Tag
+			valNode.Content = seq.Content
+			continue
 		}
-		valNode.Kind = seq.Kind
-		valNode.Tag = seq.Tag
-		valNode.Content = seq.Content
+
+		// Neither pure map nor pure sequence — mixed format
+		return "", fmt.Errorf("%s: mixed map and list syntax detected. Use either all map keys (e.g. 'foo:') or all list items (e.g. '- id: foo'), not both", blockName)
 	}
 
 	result, err := yaml.Marshal(&doc)
 	if err != nil {
-		return yamlText
+		return yamlText, fmt.Errorf("normalizeMapToList: marshal yaml: %w", err)
 	}
-	return strings.TrimSpace(string(result))
+	return strings.TrimSpace(string(result)), nil
 }
 
 func expandEnvVars(s string) string {

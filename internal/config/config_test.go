@@ -931,7 +931,10 @@ backends:
     type: anthropic
     base_url: "https://api.anthropic.com/v1/"
 `
-	result := normalizeMapToList(input, "backends", "id")
+	result, err := normalizeMapToList(input, "backends", "id")
+	if err != nil {
+		t.Fatalf("normalizeMapToList failed: %v", err)
+	}
 
 	// Verify it can be parsed as a list
 	var cfg struct {
@@ -963,7 +966,10 @@ routes:
     backend: bar
     real_model: "another-model"
 `
-	result := normalizeMapToList(input, "routes", "virtual_model")
+	result, err := normalizeMapToList(input, "routes", "virtual_model")
+	if err != nil {
+		t.Fatalf("normalizeMapToList failed: %v", err)
+	}
 
 	// Verify it can be parsed as a list
 	var cfg struct {
@@ -992,7 +998,10 @@ backends:
     type: openai
     base_url: "http://localhost:8080/v1/"
 `
-	result := normalizeMapToList(input, "backends", "id")
+	result, err := normalizeMapToList(input, "backends", "id")
+	if err != nil {
+		t.Fatalf("normalizeMapToList failed: %v", err)
+	}
 
 	// Verify it can be parsed as a list
 	var cfg struct {
@@ -1102,5 +1111,26 @@ backends:
 	// Explicit id in the map value takes precedence over the map key
 	if cfg.Backends[0].ID != "explicit-id" {
 		t.Errorf("expected backend id 'explicit-id', got %q", cfg.Backends[0].ID)
+	}
+}
+
+func TestNormalizeMapToList_MixedFormatError(t *testing.T) {
+	input := `
+backends:
+  map-backend:
+    type: openai
+    base_url: "http://localhost:8080/v1/"
+  - id: list-backend
+    type: openai
+    base_url: "http://localhost:8081/v1/"
+`
+	_, err := normalizeMapToList(input, "backends", "id")
+	if err == nil {
+		t.Fatal("expected error for mixed map/list format, got nil")
+	}
+	// The YAML parser catches mixed format before the normalizer;
+	// the error propagates as "parse yaml" which is sufficient.
+	if !strings.Contains(err.Error(), "yaml") {
+		t.Errorf("expected yaml-related error, got: %v", err)
 	}
 }
