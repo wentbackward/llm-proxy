@@ -38,7 +38,7 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 	if key != "" {
 		if entry, ok := s.store.Get(key); ok {
 			pinned := findByID(pool, entry.BackendID)
-			if pinned != nil {
+			if pinned != nil && !pinned.IsFailing() {
 				overloaded := isOverloaded(pinned, s.maxConcurrency, s.kvCachePct, staleThreshold)
 				if !overloaded {
 					s.store.Touch(key)
@@ -50,25 +50,31 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 			if pinned == nil {
 				log.Printf("[lb] affinity key=%-16s pinned=%s NOT IN POOL (pool=%v)",
 					key[:min(len(key), 16)], entry.BackendID, poolIDs(pool))
+			} else {
+				log.Printf("[lb] affinity key=%-16s pinned=%s FAILING (cooldown active)",
+					key[:min(len(key), 16)], pinned.ID)
 			}
 		} else {
 			log.Printf("[lb] affinity key=%-16s MISS (no pin yet)", key[:min(len(key), 16)])
 		}
 	}
 
-	// Filter out ramping-up backends for NEW affinity pins
+	// Filter out ramping-up and failing backends for NEW affinity pins
 	// (they can still be selected if no other option exists)
 	filtered := make([]*BackendState, 0, len(pool))
 	ramping := make([]*BackendState, 0, len(pool))
+	failing := make([]*BackendState, 0, len(pool))
 	for _, b := range pool {
-		if b.IsRampingUp() {
+		if b.IsFailing() {
+			failing = append(failing, b)
+		} else if b.IsRampingUp() {
 			ramping = append(ramping, b)
 		} else {
 			filtered = append(filtered, b)
 		}
 	}
 
-	// Prefer non-ramping backends for new pins
+	// Prefer non-ramping, non-failing backends for new pins
 	var chosen *BackendState
 	var keyHash uint64
 	if key != "" {
@@ -77,14 +83,17 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 	if len(filtered) > 0 {
 		chosen = pickLeastLoaded(filtered, staleThreshold, keyHash)
 	} else if len(ramping) > 0 {
-		// All backends are ramping — pick the least loaded among them
+		// All non-failing backends are ramping — pick the least loaded among them
 		chosen = pickLeastLoaded(ramping, staleThreshold, keyHash)
+	} else if len(failing) > 0 {
+		// Everything is failing — last resort, pick least loaded
+		chosen = pickLeastLoaded(failing, staleThreshold, keyHash)
 	} else {
 		chosen = pickLeastLoaded(pool, staleThreshold, keyHash)
 	}
 
-	// Pin the new choice (but not to ramping-up backends if alternatives exist)
-	if key != "" && chosen != nil && !chosen.IsRampingUp() {
+	// Pin the new choice (but not to ramping-up or failing backends if alternatives exist)
+	if key != "" && chosen != nil && !chosen.IsRampingUp() && !chosen.IsFailing() {
 		s.store.Set(key, AffinityEntry{BackendID: chosen.ID})
 	}
 

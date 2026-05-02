@@ -22,9 +22,10 @@ type BackendState struct {
 	LastHealthCheck     time.Time
 
 	// Recovery state (protected by mu)
-	RampingUp      bool
-	RampUpEnd      time.Time
-	UnhealthySince time.Time
+	RampingUp          bool
+	RampUpEnd          time.Time
+	UnhealthySince     time.Time
+	RecentFailureUntil time.Time // exclusion window after connection-level failure
 
 	// Scraped metrics (protected by mu)
 	MetricsAvailable  bool
@@ -110,6 +111,25 @@ func (b *BackendState) RecordFailure(failures, threshold int) {
 		b.UnhealthySince = time.Now()
 	}
 	b.LastHealthCheck = time.Now()
+}
+
+// RecordDispatchFailure marks the backend as having a recent connection-level
+// failure, excluding it from selection for a cooldown period (default 10s).
+// This bridges the gap until the background alive probe marks it unhealthy.
+func (b *BackendState) RecordDispatchFailure(cooldownSeconds int) {
+	if cooldownSeconds <= 0 {
+		cooldownSeconds = 10
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.RecentFailureUntil = time.Now().Add(time.Duration(cooldownSeconds) * time.Second)
+}
+
+// IsFailing returns true if the backend is in a recent-failure cooldown window.
+func (b *BackendState) IsFailing() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return time.Now().Before(b.RecentFailureUntil)
 }
 
 // ShouldRetry returns whether enough time has passed since becoming unhealthy
