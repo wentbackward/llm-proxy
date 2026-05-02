@@ -20,7 +20,8 @@ const BuildMode = "inspect"
 // whether this is an inspect or hardened build.
 func logStartupBanner() {
 	if strings.Contains(Version, "-") {
-		log.Printf(` ____  _____   __  ___ _   _ ___ _    ___
+		log.Printf(` HIKYAKU
+____  _____   __  ___ _   _ ___ _    ___
 |   \| __\ \/ /  | _ ) | | |_ _| |  |   \
 | |)| _|  \ /   | _ \ |_| || || |__| |) |
 |___/|___| \/   |___/\___/|___|____|___/
