@@ -335,7 +335,7 @@ func (b *Balancer) runAliveCheck(job *aliveJob) {
 			b.markUnhealthy(job.id, job.failures)
 		} else {
 			job.failures = 0
-			b.markHealthy(job.id, job.rampUpSec)
+			b.markHealthy(job.id, job.failures > 0, job.rampUpSec)
 		}
 	}
 
@@ -358,7 +358,7 @@ func (b *Balancer) runAliveCheck(job *aliveJob) {
 					b.markUnhealthy(job.id, job.failures)
 				} else {
 					job.failures = 0
-					b.markHealthy(job.id, job.rampUpSec)
+					b.markHealthy(job.id, job.failures > 0, job.rampUpSec)
 				}
 			}
 		}
@@ -402,13 +402,13 @@ func (b *Balancer) doScrape(job *scrapeJob) {
 
 	if !result.Parsed {
 		job.failures = 0
-		b.markHealthy(job.id, job.rampUpSec)
+		b.markHealthy(job.id, job.failures > 0, job.rampUpSec)
 		b.updateMetrics(job.id, false, 0, 0, 0)
 		return
 	}
 
 	job.failures = 0
-	b.markHealthy(job.id, job.rampUpSec)
+	b.markHealthy(job.id, job.failures > 0, job.rampUpSec)
 	b.updateMetrics(job.id, true, result.RunningReqs, result.WaitingReqs, result.KVCachePct)
 }
 
@@ -427,7 +427,7 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 		b.markUnhealthy(job.id, job.failures)
 	} else {
 		job.failures = 0
-		b.markHealthy(job.id, job.rampUpSec)
+		b.markHealthy(job.id, false, job.rampUpSec) // initial probe, not a recovery
 	}
 
 	// If metrics retry is enabled, start a secondary ticker for /metrics polling
@@ -458,7 +458,7 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 				b.markUnhealthy(job.id, job.failures)
 			} else {
 				job.failures = 0
-				b.markHealthy(job.id, job.rampUpSec)
+				b.markHealthy(job.id, job.failures > 0, job.rampUpSec)
 			}
 
 		case <-metricsChan:
@@ -491,14 +491,20 @@ func (b *Balancer) runHealthCheck(job *healthJob) {
 	}
 }
 
-func (b *Balancer) markHealthy(id string, rampUpSeconds int) {
+func (b *Balancer) markHealthy(id string, wasUnhealthy bool, rampUpSeconds int) {
 	for _, grp := range b.groups {
-		if st, ok := grp.States[id]; ok {
-			wasHealthy := st.IsHealthy()
-			st.SetHealthy(rampUpSeconds)
-			if !wasHealthy {
-				log.Printf("[lb] backend %-20s HEALTHY (ramp-up=%ds)", id, rampUpSeconds)
-			}
+		st, ok := grp.States[id]
+		if !ok {
+			continue
+		}
+		rampSec := 0
+		if wasUnhealthy && rampUpSeconds > 0 {
+			rampSec = rampUpSeconds // only ramp after recovery
+		}
+		wasHealthy := st.IsHealthy()
+		st.SetHealthy(rampSec)
+		if !wasHealthy {
+			log.Printf("[lb] backend %-20s HEALTHY (ramp-up=%ds)", id, rampSec)
 		}
 	}
 }
