@@ -132,6 +132,41 @@ func (b *BackendState) IsFailing() bool {
 	return time.Now().Before(b.RecentFailureUntil)
 }
 
+// RecordRequestOutcome tracks health from real traffic. Success resets
+// the failure counter; failure increments it. After unhealthyAfter
+// consecutive failures, marks the backend unhealthy. This is the
+// ground-truth signal — if a backend handles messages, it's alive.
+func (b *BackendState) RecordRequestOutcome(success bool, unhealthyAfter, rampUpSeconds int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.LastHealthCheck = time.Now()
+
+	if success {
+		b.ConsecutiveFailures = 0
+		if !b.Healthy {
+			b.Healthy = true
+			if rampUpSeconds > 0 {
+				b.RampingUp = true
+				b.RampUpEnd = time.Now().Add(time.Duration(rampUpSeconds) * time.Second)
+			} else {
+				b.RampingUp = false
+			}
+		} else if b.RampingUp && time.Now().After(b.RampUpEnd) {
+			b.RampingUp = false
+		}
+		return
+	}
+
+	b.ConsecutiveFailures++
+	if unhealthyAfter <= 0 {
+		unhealthyAfter = 3
+	}
+	if b.ConsecutiveFailures >= unhealthyAfter && b.Healthy {
+		b.Healthy = false
+		b.UnhealthySince = time.Now()
+	}
+}
+
 // ShouldRetry returns whether enough time has passed since becoming unhealthy
 // to warrant another health check attempt.
 func (b *BackendState) ShouldRetry(retryDelaySec int) bool {
