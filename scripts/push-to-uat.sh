@@ -5,8 +5,9 @@ set -euo pipefail
 
 VERSION="${1:-$(git describe --tags --dirty 2>/dev/null || echo dev)}"
 IMAGE_NAME="hikyaku"
-REMOTE_USER="paul"
-REMOTE_HOST="limone"
+REMOTE_USER="hikyaku"
+REMOTE_HOST="avocado"
+SSH_KEY="$HOME/.ssh/id_deploy"
 INSTALL_DIR="~/hikyaku"  # where config lives on the remote
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -20,10 +21,10 @@ SIZE=$(du -h "${TMPDIR}/image.tar" | cut -f1)
 echo "   Image size: ${SIZE}"
 
 echo ">> SCP to ${REMOTE_USER}@${REMOTE_HOST}"
-scp "${TMPDIR}/image.tar" "${REMOTE_USER}@${REMOTE_HOST}:~/image.tar"
+scp -i "${SSH_KEY}" "${TMPDIR}/image.tar" "${REMOTE_USER}@${REMOTE_HOST}:~/image.tar"
 
 echo ">> Loading and deploying on ${REMOTE_HOST}"
-ssh "${REMOTE_USER}@${REMOTE_HOST}" <<SSH
+ssh -i "${SSH_KEY}" "${REMOTE_USER}@${REMOTE_HOST}" <<SSH
 set -e
 echo "Loading image..."
 docker load -i ~/image.tar
