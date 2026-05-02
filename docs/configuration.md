@@ -488,17 +488,102 @@ routes:
 
 ### Health and recovery model
 
-The proxy tracks three independent signals per backend:
+The proxy uses multiple independent signals to determine backend health. Operators can tune or disable each signal independently.
 
-1. **Alive** — OR-based: a lightweight chat probe (`max_tokens: 1`) OR a GET to `/health`. Either succeeding means the backend is reachable. Independent from metrics scraping.
-2. **Quality** — rolling window of flow stats (success/failure ratio, stall rate, staleness). Penalizes backends with degraded outcomes.
-3. **Capacity** — composite of scraped metrics (KV cache %, running/queued requests), local in-flight count, and stalled requests. Determines overload.
+#### Health signals
 
-A backend must be **alive** to receive traffic. Within alive backends, **quality** and **capacity** feed the composite load score used by `sticky_least_loaded`.
+**Ground-truth: real request outcomes.** Every proxied request feeds the health state directly:
+- **Success (2xx)** → resets the failure counter, recovers an unhealthy backend immediately
+- **Failure (5xx)** → increments the consecutive failure counter; after 3 strikes the backend is marked unhealthy and evicted from the pool
+- **Connection errors** (refused, reset, EOF) → same treatment as 5xx, plus immediate pin invalidation
+- **Timeouts** → ignored for health purposes. A timeout means the backend is busy (long generation), not broken. The timeout itself is the throttle.
 
-**Graduated recovery:** When a backend comes back online, it enters a ramp-up phase (`ramp_up_seconds`, default 60s). During ramp-up, existing affinity pins are honored but new pins are declined — giving the backend time to warm its KV cache without absorbing new sessions prematurely. A `retry_delay_seconds` (default 30s) prevents hammering a dead backend with rapid re-probes.
+This is the primary health signal. A backend that serves messages is alive, regardless of what any probe says.
 
-**Metrics retry:** If `/metrics` is unavailable at startup, the proxy falls back to health-only mode and periodically retries `/metrics` (default every 120s). When it becomes available, the proxy seamlessly transitions to full scraping — no restart required.
+**Health probes (GET).** Periodic GET requests to a configurable path (default: `models`, resolving to `{base_url}models`). Lightweight — no tokens consumed, no KV cache pressure. Marks backends unhealthy after `unhealthy_after` consecutive failures (default: 3). Can be disabled entirely with `health_check.enabled: false`.
+
+**Alive probes (OR-based).** More invasive checks that validate the full inference pipeline. Configured per-group under `load_balancing.alive.probes`. Two types:
+- `lightweight_chat` — sends a minimal chat completion (`max_tokens: 1`) to exercise the full pipeline
+- `http_get` — GET to an arbitrary path (e.g., `/health`)
+
+Either probe succeeding means the backend is alive. Can be disabled with `alive.enabled: false`.
+
+**Quality & capacity.** Rolling window of flow stats (TTFT, error rate, stall rate) and scraped metrics (KV cache %, running/queued requests). These feed the composite load score for `sticky_least_loaded` — they influence *which* backend gets picked, not *whether* it's healthy.
+
+#### Innocent until proven guilty
+
+If a backend has active requests (`InFlight > 0`), it is exempt from probe-based demotion. The backend is doing real work — it is alive by definition. Probe failures during busy periods are ignored. This prevents false-positive demotions during long generations where the backend is CPU-bound and drops probe connections.
+
+#### Failover and pin migration
+
+When a pinned backend fails, the affinity pin is invalidated so the next request migrates to a healthy peer:
+- **Connection errors** → pin invalidated, backend excluded from selection for 10s cooldown
+- **5xx responses** → pin invalidated, backend excluded from selection for 10s cooldown
+- **Timeouts** → pin NOT invalidated (backend busy, not dead)
+
+During the cooldown window, the failing backend is excluded from new affinity pins. Existing traffic on other backends is unaffected.
+
+#### Graduated recovery
+
+When a backend recovers (any success resets the failure counter), it enters a ramp-up phase (`ramp_up_seconds`, default 60s). During ramp-up:
+- Existing affinity pins to this backend are honored
+- New affinity pins are declined — the backend only receives traffic from existing sessions
+- This gives the backend time to warm its KV cache without absorbing new sessions prematurely
+
+A `retry_delay_seconds` (default 30s) prevents hammering a dead backend with rapid re-probes.
+
+#### Zero-probe mode
+
+Both probe systems can be disabled entirely:
+
+```yaml
+groups:
+  my-group:
+    health_check:
+      enabled: false
+    monitoring:
+      alive:
+        enabled: false
+```
+
+With no probes, health is driven solely by real request outcomes. A lightweight **passive recovery** loop runs instead: after a cooldown period (configured via `recovery.retry_delay_seconds`, default 30s), unhealthy backends are flipped back to healthy and given a chance with real traffic. If those requests succeed, the backend stays; if they fail (3 strikes), it goes back to unhealthy.
+
+This mode is suitable for backends that don't expose `/health` or `/models`, or where operators want to avoid synthetic traffic entirely.
+
+#### Configuration reference
+
+```yaml
+load_balancing:                        # global defaults
+  alive:
+    enabled: true                      # true | false (default: true)
+    interval_seconds: 60
+    unhealthy_after: 3
+    probes:
+      - type: lightweight_chat
+        timeout_seconds: 5
+      - type: http_get
+        path: /health
+        timeout_seconds: 2
+  recovery:
+    retry_delay_seconds: 30            # cooldown before retrying unhealthy backends
+    ramp_up_seconds: 60                # ramp-up phase after recovery
+
+groups:
+  my-group:
+    health_check:
+      enabled: true                    # true | false (default: true)
+      path: models                     # relative path, resolved against base_url
+      interval_seconds: 10
+      timeout_seconds: 2
+      unhealthy_after: 3
+    monitoring:
+      alive:
+        enabled: false                 # override: disable alive probes for this group
+```
+
+#### Metrics retry
+
+If `/metrics` is unavailable at startup, the proxy falls back to health-only mode and periodically retries `/metrics` (default every 120s). When it becomes available, the proxy seamlessly transitions to full scraping — no restart required.
 
 ### Request defenders
 

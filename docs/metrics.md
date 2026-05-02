@@ -13,6 +13,9 @@ All metrics are exported via OpenTelemetry with a Prometheus exporter. Default e
 | `llm_generation_tokens_per_second` | Gauge | `backend`, `model` | Output token generation speed for the last completed request |
 | `llm_think_content_ratio` | Histogram | `backend`, `model` | Fraction of response that is thinking/reasoning vs content |
 | `llm_prompt_tokens_per_request` | Histogram | `backend`, `model` | Prompt token count per request |
+| `hikyaku_active_requests` | Gauge | — | Total requests in flight across all backends |
+| `hikyaku_affinity_cache_entries` | Gauge | — | Number of cached affinity pins |
+| `hikyaku_request_body_bytes_buffered` | Gauge | — | Bytes held in proxy buffers awaiting responses |
 
 ## Labels
 

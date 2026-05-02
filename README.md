@@ -19,9 +19,9 @@ An enterprise grade, highly performant route virtualizer for your infrerence wor
 | **Accelerate** and connect your agentic process designers and software engineers to the models they need | **Manage** inference backends across any disparate landscape of providers, local or in the cloud |
 | **Simple** to deploy in minutes, serve thousands of users with minimal hardawre | **Secure** by default - **protect** your traffic, your API keys and control access |
 | **Curate and Control** approved models | **Reliable** low latency and highly available  |
-| Smart **load-balancing** increases concurrent throughput and ensures maximum benefit of KV cache utlization | **Inspect** and debug messages to speed up analysis and problem solving  |
+| Smart **load-balancing** with KV-cache affinity, ground-truth health, and failover migration | **Inspect** and debug messages to speed up analysis and problem solving  |
 | **Set** and **clamp** sampling parameters to ensure optimal model performance | Deploy **defenders** like loop detector and supress 'zero' messages before they waste valuable tokens |
-| **RFC 3986 compliant** URL resolution — no string concatenation, no double-prefix bugs | **Graduated recovery** — backends come back gently with ramp-up and affinity awareness |
+| **RFC 3986 compliant** URL resolution — no string concatenation, no double-prefix bugs | **Zero-probe mode** — health driven by real traffic alone, no synthetic probes needed |
 
 ## Virtualize
 
@@ -180,11 +180,13 @@ The **default backend** is the one marked `default: true` in its config, or the 
 
 Instead of pinning a route to a single backend, use `backend_group:` to spread traffic across a named group. The proxy supports four strategies — `sticky_least_loaded` (pins sessions for KV-cache locality), `least_loaded`, `round_robin`, and `single`.
 
-**Three-layer health model.** Each backend is monitored on three signals: **Alive** (OR-based lightweight chat or HTTP GET), **Quality** (rolling window of request outcomes), and **Capacity** (composite of scraped metrics, in-flight, and stalled requests). Backends must be alive to receive traffic; quality and capacity feed the load score.
+**Ground-truth health.** Real request outcomes drive backend health: 3 consecutive failures mark a backend unhealthy; any success recovers it. Probes complement this by catching issues during quiet periods. All probes can be disabled — the proxy works on traffic alone.
 
-**Graduated recovery.** When a backend comes back online, it enters a ramp-up phase — existing affinity pins are honored, new pins are declined. Gives the backend time to warm its KV cache without absorbing new sessions prematurely.
+**Failover migration.** When a pinned backend fails (connection error or 5xx), the affinity pin is invalidated and the backend excluded for a short cooldown. Next request migrates to a healthy peer. Timeouts are tolerated — they mean the backend is busy, not dead.
 
-**Request defenders.** Pre-routing checks short-circuit pathological requests: loop detection catches repeated identical requests from agent retry loops; zero-content detection rejects trivial user content wrapped in massive system/tool definitions. Both configurable globally and per-route.
+**Innocent until proven guilty.** Backends with active requests are immune to probe-based demotion. Long generations won't trigger false positives.
+
+**Graduated recovery.** Backends recover gently: ramp-up phase honors existing pins but declines new ones, giving time to warm the KV cache.
 
 See [Configuration → Load Balancing](docs/configuration.md#load-balancing) for the full reference and [LOAD-BALANCING.md](LOAD-BALANCING.md) for the design specification.
 
