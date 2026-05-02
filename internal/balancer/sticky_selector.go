@@ -70,13 +70,17 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 
 	// Prefer non-ramping backends for new pins
 	var chosen *BackendState
+	var keyHash uint64
+	if key != "" {
+		keyHash = fnv64a([]byte(key))
+	}
 	if len(filtered) > 0 {
-		chosen = pickLeastLoaded(filtered, staleThreshold)
+		chosen = pickLeastLoaded(filtered, staleThreshold, keyHash)
 	} else if len(ramping) > 0 {
 		// All backends are ramping — pick the least loaded among them
-		chosen = pickLeastLoaded(ramping, staleThreshold)
+		chosen = pickLeastLoaded(ramping, staleThreshold, keyHash)
 	} else {
-		chosen = pickLeastLoaded(pool, staleThreshold)
+		chosen = pickLeastLoaded(pool, staleThreshold, keyHash)
 	}
 
 	// Pin the new choice (but not to ramping-up backends if alternatives exist)

@@ -14,7 +14,7 @@ func TestPickLeastLoaded_LowestInFlight(t *testing.T) {
 	pool[0].InFlight.Add(5)
 	pool[1].InFlight.Add(1)
 	pool[2].InFlight.Add(3)
-	chosen := pickLeastLoaded(pool, 30*time.Second)
+	chosen := pickLeastLoaded(pool, 30*time.Second, 0)
 	if chosen.ID != "b" {
 		t.Errorf("expected b (lowest in-flight), got %s", chosen.ID)
 	}
@@ -28,7 +28,7 @@ func TestPickLeastLoaded_WeightBias(t *testing.T) {
 	pool[0].InFlight.Add(2) // effective: 2/2 = 1.0
 	pool[1].InFlight.Add(1) // effective: 1/1 = 1.0
 	// Tiebreak by ID hash — "heavy" < "light" lexicographically
-	chosen := pickLeastLoaded(pool, 30*time.Second)
+	chosen := pickLeastLoaded(pool, 30*time.Second, 0)
 	// Either is acceptable; the point is it doesn't panic or oscillate
 	if chosen == nil {
 		t.Fatal("must return a backend")

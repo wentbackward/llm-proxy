@@ -16,17 +16,27 @@ type Selector interface {
 // pickLeastLoaded returns the backend with the lowest effective load score.
 // Lower is better. Uses scraped metrics when available, falls back to InFlight.
 // Incorporates flow statistics for quality-aware routing.
-func pickLeastLoaded(pool []*BackendState, staleThreshold time.Duration) *BackendState {
-	best := pool[0]
+// When multiple backends tie, uses keyHash to deterministically spread
+// assignments (0 means no spread — picks first in pool order).
+func pickLeastLoaded(pool []*BackendState, staleThreshold time.Duration, keyHash uint64) *BackendState {
 	bestScore := loadScore(pool[0], staleThreshold)
+	tied := []*BackendState{pool[0]}
+
 	for _, b := range pool[1:] {
 		score := loadScore(b, staleThreshold)
 		if score < bestScore {
-			best = b
 			bestScore = score
+			tied = []*BackendState{b}
+		} else if score == bestScore {
+			tied = append(tied, b)
 		}
 	}
-	return best
+
+	if len(tied) == 1 || keyHash == 0 {
+		return tied[0]
+	}
+	// Hash-based spread among equally-loaded backends
+	return tied[keyHash%uint64(len(tied))]
 }
 
 // loadScore computes the composite load score for a backend.

@@ -40,7 +40,7 @@ func (s leastLoadedSelector) Select(pool []*BackendState, _ string, ctx *Request
 	if ctx != nil && ctx.StaleThreshold > 0 {
 		staleThreshold = ctx.StaleThreshold
 	}
-	return pickLeastLoaded(pool, staleThreshold), nil
+	return pickLeastLoaded(pool, staleThreshold, 0), nil
 }
 
 // NewSelector constructs a Selector from the strategy name.
