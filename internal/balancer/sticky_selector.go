@@ -1,6 +1,10 @@
 package balancer
 
-import "time"
+import (
+	"log"
+	"slices"
+	"time"
+)
 
 // StickyLeastLoaded pins requests to a backend by affinity key,
 // falling back to least-loaded when the pinned target is overloaded or unavailable.
@@ -33,16 +37,20 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 	// Try affinity pin
 	if key != "" {
 		if entry, ok := s.store.Get(key); ok {
-			if pinned := findByID(pool, entry.BackendID); pinned != nil {
-				// Honor existing pins even during ramp-up (cache locality matters)
-				if !isOverloaded(pinned, s.maxConcurrency, s.kvCachePct, staleThreshold) {
+			pinned := findByID(pool, entry.BackendID)
+			if pinned != nil {
+				overloaded := isOverloaded(pinned, s.maxConcurrency, s.kvCachePct, staleThreshold)
+				if !overloaded {
 					s.store.Touch(key)
 					return pinned, nil
 				}
-				// Pinned target is overloaded — bail, but don't evict the entry.
-				// It may recover before TTL expires.
+				log.Printf("[lb] affinity key=%-16s pinned=%s OVERLOADED (inflight=%d, max=%d)",
+					key[:min(len(key), 16)], pinned.ID, pinned.InFlight.Load(), s.maxConcurrency)
 			}
-			// Pinned backend not in healthy pool — fall through.
+			if pinned == nil {
+				log.Printf("[lb] affinity key=%-16s pinned=%s NOT IN POOL (pool=%v)",
+					key[:min(len(key), 16)], entry.BackendID, poolIDs(pool))
+			}
 		}
 	}
 
@@ -85,4 +93,14 @@ func findByID(pool []*BackendState, id string) *BackendState {
 		}
 	}
 	return nil
+}
+
+// poolIDs extracts sorted backend IDs from a pool for logging.
+func poolIDs(pool []*BackendState) []string {
+	ids := make([]string, len(pool))
+	for i, b := range pool {
+		ids[i] = b.ID
+	}
+	slices.Sort(ids)
+	return ids
 }

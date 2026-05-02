@@ -23,7 +23,7 @@ type lruNode struct {
 // The in-memory implementation uses LRU + TTL eviction;
 // a future Redis implementation plugs in here.
 type AffinityStore interface {
-	Get(key string) (*AffinityEntry, bool)
+	Get(key string) (AffinityEntry, bool)
 	Set(key string, entry AffinityEntry)
 	Touch(key string) // refresh LastSeen
 	Delete(key string)
@@ -49,17 +49,17 @@ func NewInMemoryStore(ttl time.Duration, maxSize int) AffinityStore {
 	}
 }
 
-func (s *inMemoryStore) Get(key string) (*AffinityEntry, bool) {
+func (s *inMemoryStore) Get(key string) (AffinityEntry, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	node, ok := s.entries[key]
 	if !ok {
-		return nil, false
+		return AffinityEntry{}, false
 	}
 	if time.Since(node.entry.LastSeen) > s.ttl {
-		return nil, false // expired
+		return AffinityEntry{}, false // expired
 	}
-	return node.entry, true
+	return *node.entry, true
 }
 
 func (s *inMemoryStore) Set(key string, entry AffinityEntry) {
