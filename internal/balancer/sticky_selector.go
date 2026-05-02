@@ -51,6 +51,8 @@ func (s *StickyLeastLoaded) Select(pool []*BackendState, key string, ctx *Reques
 				log.Printf("[lb] affinity key=%-16s pinned=%s NOT IN POOL (pool=%v)",
 					key[:min(len(key), 16)], entry.BackendID, poolIDs(pool))
 			}
+		} else {
+			log.Printf("[lb] affinity key=%-16s MISS (no pin yet)", key[:min(len(key), 16)])
 		}
 	}
 

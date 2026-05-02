@@ -77,7 +77,7 @@ func (s *Server) handleOllamaTags(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid backend URL: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	upURL := base.ResolveReference(&url.URL{Path: "/api/tags"}).String()
+	upURL := base.ResolveReference(&url.URL{Path: "api/tags"}).String()
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL, http.NoBody)
 	if err != nil {
 		jsonError(w, "failed to build upstream request: "+err.Error(), http.StatusInternalServerError)

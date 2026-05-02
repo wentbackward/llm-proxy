@@ -28,7 +28,7 @@ git tag v0.x.y
 git push origin v0.x.y
 ```
 
-Do NOT tag without explicit user confirmation. Never say "the pipeline will pick it up" about a plain push — that's only tests. Be precise: "pushed to main, tests will run" vs "tagged v0.x.y, full release workflow running."
+**Do NOT push to `main` and do NOT tag without explicit user confirmation.** Ask first. Say "ready to push" or "ready to tag vX.Y.Z" and wait for approval. Never push or tag on your own initiative. Never say "the pipeline will pick it up" about a plain push — that's only tests. Be precise: "pushed to main, tests will run" vs "tagged v0.x.y, full release workflow running."
 
 Versioning convention: patch bumps for features and fixes alike in the pre-1.0 series.
 

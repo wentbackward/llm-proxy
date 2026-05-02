@@ -214,7 +214,7 @@ func probeBackends(cfg *config.Config) {
 			log.Printf("[probe] backend %-12s ERROR parsing URL: %v", b.ID, err)
 			continue
 		}
-		probeURL := base.ResolveReference(&url.URL{Path: "/models"}).String()
+		probeURL := base.ResolveReference(&url.URL{Path: "models"}).String()
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, probeURL, http.NoBody)
 		if err != nil {
 			log.Printf("[probe] backend %-12s ERROR building request: %v", b.ID, err)

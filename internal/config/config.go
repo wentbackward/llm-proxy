@@ -429,7 +429,7 @@ func applyDefaults(cfg *Config) {
 			g.Overload.StaleMetricsAction = "pin"
 		}
 		if g.HealthCheck.Path == "" {
-			g.HealthCheck.Path = "/v1/models"
+			g.HealthCheck.Path = "models"
 		}
 		if g.HealthCheck.IntervalSeconds == 0 {
 			g.HealthCheck.IntervalSeconds = 10
@@ -822,8 +822,8 @@ func (c *Config) GetAliveConfig(group *GroupConfig) AliveConfig {
 		IntervalSeconds: 60,
 		UnhealthyAfter:  3,
 		Probes: []AliveProbe{
-			{Type: "lightweight_chat", Path: "/v1/chat/completions", TimeoutSeconds: 5},
-			{Type: "http_get", Path: "/health", TimeoutSeconds: 2},
+			{Type: "lightweight_chat", Path: "chat/completions", TimeoutSeconds: 5},
+			{Type: "http_get", Path: "health", TimeoutSeconds: 2},
 		},
 	}
 
@@ -836,7 +836,7 @@ func (c *Config) GetAliveConfig(group *GroupConfig) AliveConfig {
 		cfg.UnhealthyAfter = glbl.UnhealthyAfter
 	}
 	if len(glbl.Probes) > 0 {
-		cfg.Probes = glbl.Probes
+		cfg.Probes = applyProbeDefaults(glbl.Probes)
 	}
 
 	// Per-group override
@@ -849,10 +849,32 @@ func (c *Config) GetAliveConfig(group *GroupConfig) AliveConfig {
 			cfg.UnhealthyAfter = rt.UnhealthyAfter
 		}
 		if len(rt.Probes) > 0 {
-			cfg.Probes = rt.Probes
+			cfg.Probes = applyProbeDefaults(rt.Probes)
 		}
 	}
 	return cfg
+}
+
+// applyProbeDefaults fills in missing probe fields with sensible defaults.
+// Paths are relative so they append to base_url (RFC 3986) — the base_url
+// owns any version prefix like /v1/.
+func applyProbeDefaults(probes []AliveProbe) []AliveProbe {
+	out := make([]AliveProbe, len(probes))
+	for i, p := range probes {
+		out[i] = p
+		if p.Path == "" {
+			switch p.Type {
+			case "lightweight_chat":
+				out[i].Path = "chat/completions"
+			case "http_get":
+				out[i].Path = "health"
+			}
+		}
+		if p.TimeoutSeconds == 0 {
+			out[i].TimeoutSeconds = 5
+		}
+	}
+	return out
 }
 
 // GetMetricsConfig resolves metrics scraping config for a group,
