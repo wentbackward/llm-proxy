@@ -1,5 +1,5 @@
-# hikyaku 飞脚
-![Hikyaku](assets/hiyaku-main.png "_Hikyaku - 飞脚 - Flying Feet - were specialized, high-speed couriers in Edo-period Japan (17th–19th century) who delivered mail, money, and cargo across the country, often covering 500 km between Osaka and Edo in just 3–6 days. They worked in relays, wearing minimal gear to move quickly over treacherous terrain. The perfect analogy for the lightweight, high-performance system, you trust to delivery yor inference messages_")
+# hikyaku 飛脚
+![Hikyaku](assets/hiyaku-main.png "_Hikyaku - 飛脚 - Flying Feet - were specialized, high-speed couriers in Edo-period Japan (17th–19th century) who delivered mail, money, and cargo across the country, often covering 500 km between Osaka and Edo in just 3–6 days. They worked in relays, wearing minimal gear to move quickly over treacherous terrain. The perfect analogy for the lightweight, high-performance system, you trust to delivery yor inference messages_")
 
 [![CI](https://github.com/wentbackward/hikyaku/actions/workflows/ci.yml/badge.svg)](https://github.com/wentbackward/hikyaku/actions/workflows/ci.yml)
 [![Release](https://github.com/wentbackward/hikyaku/actions/workflows/release.yml/badge.svg)](https://github.com/wentbackward/hikyaku/actions/workflows/release.yml)
