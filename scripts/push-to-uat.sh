@@ -1,6 +1,6 @@
 #!/bin/bash
-# push-to-prod.sh — build local Docker image, SCP to limone, deploy
-# Usage: ./scripts/push-to-prod.sh [version_tag]
+# push-to-uat.sh — build local Docker image, SCP to avocado, deploy
+# Usage: ./scripts/push-to-uat.sh [version_tag]
 set -euo pipefail
 
 VERSION="${1:-$(git describe --tags --dirty 2>/dev/null || echo dev)}"
@@ -24,7 +24,7 @@ echo ">> SCP to ${REMOTE_USER}@${REMOTE_HOST}"
 scp -i "${SSH_KEY}" "${TMPDIR}/image.tar" "${REMOTE_USER}@${REMOTE_HOST}:~/image.tar"
 
 echo ">> Loading and deploying on ${REMOTE_HOST}"
-ssh -i "${SSH_KEY}" "${REMOTE_USER}@${REMOTE_HOST}" <<SSH
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" <<EOF
 set -e
 echo "Loading image..."
 docker load -i ~/image.tar
@@ -35,18 +35,18 @@ docker stop ${IMAGE_NAME} || true
 docker rm ${IMAGE_NAME} || true
 
 echo "Starting new container..."
-docker run -d \\
-  --name ${IMAGE_NAME} \\
-  --restart unless-stopped \\
-  -p 4000:4000 \\
-  -p 9091:9091 \\
-  -v ${INSTALL_DIR}/config.yaml:/config/config.yaml:ro \\\
-  -e PROXY_API_KEY \\
+docker run -d \
+  --name ${IMAGE_NAME} \
+  --restart unless-stopped \
+  -p 4000:4000 \
+  -p 9091:9091 \
+  -v ${INSTALL_DIR}/config.yaml:/config/config.yaml:ro \
+  -e PROXY_API_KEY \
   ${IMAGE_NAME}:${VERSION}
 
 sleep 2
 echo "Container status:"
 docker ps --filter name=${IMAGE_NAME} --format "{{.Names}} {{.Status}}"
-SSH
+EOF
 
-echo "✅ Deployed ${IMAGE_NAME}:${VERSION} to ${REMOTE_HOST}"
+echo "Deployed ${IMAGE_NAME}:${VERSION} to ${REMOTE_HOST}"
