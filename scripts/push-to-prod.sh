@@ -7,6 +7,7 @@ VERSION="${1:-$(git describe --tags --dirty 2>/dev/null || echo dev)}"
 IMAGE_NAME="hikyaku"
 REMOTE_USER="paul"
 REMOTE_HOST="limone"
+INSTALL_DIR="~/hikyaku"  # where config lives on the remote
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
@@ -38,7 +39,7 @@ docker run -d \\
   --restart unless-stopped \\
   -p 4000:4000 \\
   -p 9091:9091 \\
-  -v ~/config/config.yaml:/config/config.yaml:ro \\
+  -v ${INSTALL_DIR}/config.yaml:/config/config.yaml:ro \\\
   -e PROXY_API_KEY \\
   ${IMAGE_NAME}:${VERSION}
 
