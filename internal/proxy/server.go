@@ -352,6 +352,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	isStreaming, _ := body["stream"].(bool)
 
 	var backend *config.Backend
+	var lbGroup, lbAffKey string // affinity group/key for pin invalidation on failure
 	var realModel string
 
 	cfg := s.cfg.Load()
@@ -439,6 +440,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 				headerName := strings.TrimPrefix(grpCfg.Affinity.Key, "header:")
 				affKey = balancer.HeaderAffinityKey(r.Header, headerName)
 			}
+			lbGroup = res.Group
+			lbAffKey = affKey
 
 			selected, selErr := s.balancer.Select(res.Group, affKey, &balancer.RequestContext{
 				AffinityKey:   affKey,
@@ -610,6 +613,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
 			if s.balancer != nil {
 				s.balancer.CompleteAndDecr(backendID, false, false, 0)
+				// Invalidate affinity pin so next request migrates to a healthy backend
+				s.balancer.InvalidatePin(lbGroup, lbAffKey)
 			}
 			upstreamURL := targetURL.ResolveReference(&url.URL{Path: r.URL.Path}).String()
 			logger.Request("[%s] %s %s model=%s backend=%s url=%s status=502 dur=%.3fs ERROR: %v",

@@ -566,6 +566,21 @@ func (b *Balancer) CompleteAndDecr(backendID string, success, timedOut bool, ttf
 	b.Decr(backendID)
 }
 
+// InvalidatePin removes the affinity pin for the given key in the named group.
+// Called when a pinned backend fails, so subsequent requests can migrate.
+func (b *Balancer) InvalidatePin(groupName, key string) {
+	if key == "" {
+		return
+	}
+	grp, ok := b.groups[groupName]
+	if !ok {
+		return
+	}
+	if sel, ok := grp.Selector.(*StickyLeastLoaded); ok {
+		sel.store.Delete(key)
+	}
+}
+
 // isBackendHealthy checks if the backend is currently healthy.
 func (b *Balancer) isBackendHealthy(id string) bool {
 	for _, grp := range b.groups {
