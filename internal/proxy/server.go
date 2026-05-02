@@ -605,16 +605,24 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	rp := &httputil.ReverseProxy{
 		Transport:      s.transport,
 		Director:       director(targetURL, backend, newBody, opts.pathOverride, routeHeaders(res)),
-		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
+		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx, lbGroup, lbAffKey), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
 			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, "error"))
 			if s.balancer != nil {
-				s.balancer.CompleteAndDecr(backendID, false, false, 0)
-				// Invalidate affinity pin so next request migrates to a healthy backend
-				s.balancer.InvalidatePin(lbGroup, lbAffKey)
+				// Track whether this is a timeout (backend busy, not dead)
+				var isTimeout bool
+				if netErr, ok := err.(interface{ Timeout() bool }); ok {
+					isTimeout = netErr.Timeout()
+				}
+				s.balancer.CompleteAndDecr(backendID, false, isTimeout, 0)
+				// Invalidate pin for connection errors, but NOT timeouts.
+				// Timeout = backend is busy (long generation), not dead.
+				if !isTimeout {
+					s.balancer.InvalidatePin(lbGroup, lbAffKey)
+				}
 			}
 			upstreamURL := targetURL.ResolveReference(&url.URL{Path: r.URL.Path}).String()
 			logger.Request("[%s] %s %s model=%s backend=%s url=%s status=502 dur=%.3fs ERROR: %v",
@@ -880,7 +888,7 @@ func logMessageContent(rid string, body map[string]interface{}) {
 
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context, capCtx *captureCtx) func(*http.Response) error {
+func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context, capCtx *captureCtx, lbGroup, lbAffKey string) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
 
@@ -924,6 +932,10 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 					if s.balancer != nil {
 						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
+						// Invalidate pin on 5xx — backend is degrading
+						if resp.StatusCode >= 500 {
+							s.balancer.InvalidatePin(lbGroup, lbAffKey)
+						}
 					}
 					logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true",
 						rid, path, virtualModel, realModel, backendID, statusStr, elapsed)
@@ -955,6 +967,10 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 			if s.balancer != nil {
 				s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
+				// Invalidate pin on 5xx — backend is degrading
+				if resp.StatusCode >= 500 {
+					s.balancer.InvalidatePin(lbGroup, lbAffKey)
+				}
 			}
 			logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs",
 				rid, path, virtualModel, realModel, backendID, statusStr, elapsed)

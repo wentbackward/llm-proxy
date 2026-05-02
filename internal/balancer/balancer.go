@@ -584,8 +584,11 @@ func (b *Balancer) Complete(backendID string, success, timedOut bool, ttftMs flo
 func (b *Balancer) CompleteAndDecr(backendID string, success, timedOut bool, ttftMs float64) {
 	b.Complete(backendID, success, timedOut, ttftMs)
 	b.Decr(backendID)
-	// Ground-truth health: real request outcomes drive health state
-	b.recordRequestOutcome(backendID, success)
+	// Ground-truth health: real request outcomes drive health state.
+	// Timeouts don't count — backend is busy, not broken.
+	if !timedOut {
+		b.recordRequestOutcome(backendID, success)
+	}
 }
 
 // recordRequestOutcome propagates a request outcome to all groups containing this backend.
