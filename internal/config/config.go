@@ -782,6 +782,7 @@ type LoadBalancingConfig struct {
 
 // AliveConfig configures the alive check probes.
 type AliveConfig struct {
+	Enabled         string       `yaml:"enabled"`          // true | false (default: true)
 	IntervalSeconds int          `yaml:"interval_seconds"` // default: 60
 	UnhealthyAfter  int          `yaml:"unhealthy_after"`  // default: 3
 	Probes          []AliveProbe `yaml:"probes"`

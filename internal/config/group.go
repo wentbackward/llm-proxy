@@ -27,6 +27,7 @@ type OverloadConfig struct {
 
 // HealthCheckConfig defines periodic probing of backends within a group.
 type HealthCheckConfig struct {
+	Enabled         string `yaml:"enabled"` // true | false (default: true)
 	Path            string `yaml:"path"`
 	IntervalSeconds int    `yaml:"interval_seconds"`
 	TimeoutSeconds  int    `yaml:"timeout_seconds"`

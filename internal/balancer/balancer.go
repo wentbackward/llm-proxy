@@ -243,42 +243,52 @@ func (b *Balancer) startMonitoring(cfg *config.Config) {
 		}
 
 		// Metrics not available - launch health-only loop with metrics retry
-		job := &healthJob{
-			id:            info.id,
-			url:           info.url,
-			path:          healthCfg.HealthCheck.Path,
-			interval:      time.Duration(healthCfg.HealthCheck.IntervalSeconds) * time.Second,
-			timeout:       time.Duration(healthCfg.HealthCheck.TimeoutSeconds) * time.Second,
-			rampUpSec:     recovery.RampUpSec,
-			retryDelaySec: recovery.RetryDelaySec,
-		}
-		if job.interval == 0 {
-			job.interval = 10 * time.Second
-		}
-		if job.timeout == 0 {
-			job.timeout = 2 * time.Second
-		}
-
-		// Populate metrics retry info if scraping was requested but failed
-		if scrapeCfg != nil {
-			job.metricsPath = scrapeCfg.GetScrapePath()
-			job.metricsInterval = time.Duration(cfg.GetMetricsConfig(scrapeCfg).RetryIntervalSec) * time.Second
-			if job.metricsInterval == 0 {
-				job.metricsInterval = 120 * time.Second
+		// Skip if health checks are explicitly disabled
+		healthEnabled := healthCfg.HealthCheck.Enabled != "false"
+		if healthEnabled {
+			job := &healthJob{
+				id:            info.id,
+				url:           info.url,
+				path:          healthCfg.HealthCheck.Path,
+				interval:      time.Duration(healthCfg.HealthCheck.IntervalSeconds) * time.Second,
+				timeout:       time.Duration(healthCfg.HealthCheck.TimeoutSeconds) * time.Second,
+				rampUpSec:     recovery.RampUpSec,
+				retryDelaySec: recovery.RetryDelaySec,
 			}
-			job.metricsTimeout = time.Duration(cfg.GetMetricsConfig(scrapeCfg).ScrapeTimeoutSeconds) * time.Second
-			if job.metricsTimeout == 0 {
-				job.metricsTimeout = 3 * time.Second
+			if job.interval == 0 {
+				job.interval = 10 * time.Second
 			}
-			job.metricsScrapeEnabled = true
-		}
+			if job.timeout == 0 {
+				job.timeout = 2 * time.Second
+			}
 
-		b.wg.Add(1)
-		go b.runHealthCheck(job)
+			// Populate metrics retry info if scraping was requested but failed
+			if scrapeCfg != nil {
+				job.metricsPath = scrapeCfg.GetScrapePath()
+				job.metricsInterval = time.Duration(cfg.GetMetricsConfig(scrapeCfg).RetryIntervalSec) * time.Second
+				if job.metricsInterval == 0 {
+					job.metricsInterval = 120 * time.Second
+				}
+				job.metricsTimeout = time.Duration(cfg.GetMetricsConfig(scrapeCfg).ScrapeTimeoutSeconds) * time.Second
+				if job.metricsTimeout == 0 {
+					job.metricsTimeout = 3 * time.Second
+				}
+				job.metricsScrapeEnabled = true
+			}
+
+			b.wg.Add(1)
+			go b.runHealthCheck(job)
+		}
 	}
 
 	// Start alive checker for all backends
 	b.startAliveChecks(cfg)
+
+	// Start passive recovery for backends with no probes at all.
+	// When health checks and alive probes are both disabled, this is the
+	// only recovery path: after a cooldown, flip unhealthy→healthy and let
+	// real traffic validate (3 strikes and you're out again).
+	b.startPassiveRecovery(cfg)
 }
 
 // startAliveChecks launches alive check goroutines for all backends.
@@ -303,6 +313,10 @@ func (b *Balancer) startAliveChecks(cfg *config.Config) {
 
 	for _, info := range backendMap {
 		aliveCfg := cfg.GetAliveConfig(info.groups[0])
+		// Skip if alive checks are explicitly disabled or no probes configured
+		if aliveCfg.Enabled == "false" || len(aliveCfg.Probes) == 0 {
+			continue
+		}
 		recovery := cfg.GetRecovery(info.groups[0])
 		job := &aliveJob{
 			id:             info.id,
@@ -627,4 +641,75 @@ func (b *Balancer) shouldRetry(id string, retryDelaySec int) bool {
 		}
 	}
 	return true
+}
+
+// startPassiveRecovery launches a recovery loop for backends that have no
+// probes configured (health check disabled + no alive probes). After a cooldown
+// period (default 30s), it flips unhealthy→healthy and lets real traffic validate.
+func (b *Balancer) startPassiveRecovery(cfg *config.Config) {
+	// Find backends with no active probes
+	type backendInfo struct {
+		id       string
+		groups   []*config.GroupConfig
+		hasProbe bool
+	}
+	backendMap := make(map[string]*backendInfo)
+
+	for name, grpCfg := range cfg.Groups {
+		healthEnabled := grpCfg.HealthCheck.Enabled != "false"
+		aliveEnabled := cfg.GetAliveConfig(grpCfg).Enabled != "false" && len(cfg.GetAliveConfig(grpCfg).Probes) > 0
+		for _, be := range cfg.GroupBackends(name) {
+			info, exists := backendMap[be.ID]
+			if !exists {
+				info = &backendInfo{id: be.ID}
+				backendMap[be.ID] = info
+			}
+			info.groups = append(info.groups, grpCfg)
+			if healthEnabled || aliveEnabled {
+				info.hasProbe = true
+			}
+		}
+	}
+
+	// Launch passive recovery for backends with no probes
+	for _, info := range backendMap {
+		if info.hasProbe {
+			continue
+		}
+		recovery := cfg.GetRecovery(info.groups[0])
+		cooldownSec := recovery.RetryDelaySec
+		if cooldownSec <= 0 {
+			cooldownSec = 30
+		}
+		b.wg.Add(1)
+		go b.passiveRecoveryLoop(info.id, time.Duration(cooldownSec)*time.Second, recovery.RampUpSec)
+	}
+}
+
+// passiveRecoveryLoop periodically checks unhealthy backends and recovers them
+// after a cooldown. Relies on real traffic to validate (request outcomes drive health).
+func (b *Balancer) passiveRecoveryLoop(id string, cooldown time.Duration, rampUpSec int) {
+	defer b.wg.Done()
+	ticker := time.NewTicker(cooldown)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-ticker.C:
+			// Check if any group has this backend as unhealthy
+			for _, grp := range b.groups {
+				st, ok := grp.States[id]
+				if !ok {
+					continue
+				}
+				if st.IsHealthy() || !st.ShouldRetry(int(cooldown.Seconds())) {
+					continue
+				}
+				log.Printf("[lb] backend %-20s PASSIVE RECOVERY (cooldown=%vs)", id, cooldown.Seconds())
+				st.SetHealthy(rampUpSec)
+			}
+		}
+	}
 }
