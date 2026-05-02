@@ -515,6 +515,12 @@ func (b *Balancer) markUnhealthy(id string, failures int) {
 		if !ok {
 			continue
 		}
+		// Innocent until proven guilty: if the backend has in-flight requests,
+		// it's doing work. Skip probe-based demotion — real request outcomes
+		// will handle it if those fail.
+		if st.InFlight.Load() > 0 {
+			return
+		}
 		wasHealthy := st.IsHealthy()
 		threshold := grp.Cfg.HealthCheck.UnhealthyAfter
 		if threshold == 0 {
