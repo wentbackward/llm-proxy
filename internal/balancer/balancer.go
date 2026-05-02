@@ -646,6 +646,28 @@ func (b *Balancer) shouldRetry(id string, retryDelaySec int) bool {
 	return true
 }
 
+// TotalInFlight returns the sum of InFlight counters across all backends.
+func (b *Balancer) TotalInFlight() int64 {
+	var total int64
+	for _, grp := range b.groups {
+		for _, st := range grp.States {
+			total += st.InFlight.Load()
+		}
+	}
+	return total
+}
+
+// AffinityCacheSize returns the total number of cached affinity pins.
+func (b *Balancer) AffinityCacheSize() int {
+	var total int
+	for _, grp := range b.groups {
+		if sel, ok := grp.Selector.(*StickyLeastLoaded); ok {
+			total += sel.store.Len()
+		}
+	}
+	return total
+}
+
 // startPassiveRecovery launches a recovery loop for backends that have no
 // probes configured (health check disabled + no alive probes). After a cooldown
 // period (default 30s), it flips unhealthy→healthy and lets real traffic validate.

@@ -13,15 +13,18 @@ import (
 
 // Metrics holds all instrumentation handles for the proxy.
 type Metrics struct {
-	RequestDuration        metric.Float64Histogram
-	TTFT                   metric.Float64Histogram
-	PromptTokens           metric.Int64Counter
-	CompletionTokens       metric.Int64Counter
-	ActiveRequests         metric.Int64UpDownCounter
-	RequestsTotal          metric.Int64Counter
-	GenerationTokensPerSec metric.Float64Gauge
-	ThinkContentRatio      metric.Float64Histogram
-	PromptTokensPerRequest metric.Int64Histogram
+	RequestDuration          metric.Float64Histogram
+	TTFT                     metric.Float64Histogram
+	PromptTokens             metric.Int64Counter
+	CompletionTokens         metric.Int64Counter
+	ActiveRequests           metric.Int64UpDownCounter
+	ActiveRequestsTotal      metric.Float64Gauge
+	RequestsTotal            metric.Int64Counter
+	GenerationTokensPerSec   metric.Float64Gauge
+	ThinkContentRatio        metric.Float64Histogram
+	PromptTokensPerRequest   metric.Int64Histogram
+	AffinityCacheEntries     metric.Float64Gauge
+	RequestBodyBytesBuffered metric.Float64Gauge
 }
 
 // Init creates the OTel meter provider backed by Prometheus and returns the
@@ -102,16 +105,40 @@ func Init() (*Metrics, http.Handler, error) {
 		return nil, nil, err
 	}
 
+	activeTotal, err := meter.Float64Gauge("hikyaku_active_requests",
+		metric.WithDescription("Total requests currently in flight across all backends"),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	affinityEntries, err := meter.Float64Gauge("hikyaku_affinity_cache_entries",
+		metric.WithDescription("Number of affinity pins currently cached"),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bufferedBytes, err := meter.Float64Gauge("hikyaku_request_body_bytes_buffered",
+		metric.WithDescription("Bytes currently held in the proxy waiting to forward or waiting on responses"),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return &Metrics{
-		RequestDuration:        reqDur,
-		TTFT:                   ttft,
-		PromptTokens:           promptTok,
-		CompletionTokens:       completionTok,
-		ActiveRequests:         active,
-		RequestsTotal:          total,
-		GenerationTokensPerSec: genTPS,
-		ThinkContentRatio:      thinkRatio,
-		PromptTokensPerRequest: promptPerReq,
+		RequestDuration:          reqDur,
+		TTFT:                     ttft,
+		PromptTokens:             promptTok,
+		CompletionTokens:         completionTok,
+		ActiveRequests:           active,
+		ActiveRequestsTotal:      activeTotal,
+		RequestsTotal:            total,
+		GenerationTokensPerSec:   genTPS,
+		ThinkContentRatio:        thinkRatio,
+		PromptTokensPerRequest:   promptPerReq,
+		AffinityCacheEntries:     affinityEntries,
+		RequestBodyBytesBuffered: bufferedBytes,
 	}, promhttp.Handler(), nil
 }
 

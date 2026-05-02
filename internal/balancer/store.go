@@ -29,6 +29,7 @@ type AffinityStore interface {
 	Delete(key string)
 	EvictExpired(now time.Time)
 	Migrate(keptBackends map[string]struct{}) // delete entries whose backendID is NOT in keys
+	Len() int                                 // current number of cached entries
 }
 
 // inMemoryStore is the default AffinityStore.
@@ -119,6 +120,13 @@ func (s *inMemoryStore) EvictExpired(now time.Time) {
 		s.lru.Remove(node.element)
 		delete(s.entries, key)
 	}
+}
+
+// Len returns the current number of cached affinity entries.
+func (s *inMemoryStore) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.entries)
 }
 
 func (s *inMemoryStore) Migrate(keptBackends map[string]struct{}) {

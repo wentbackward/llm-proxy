@@ -49,9 +49,10 @@ type Server struct {
 	balancer     *balancer.Balancer              // nil if no groups configured
 	loopDetector *loopDetector                   // loop detection state
 
-	transport  *http.Transport          // shared connection pool for all backends
-	mu         sync.RWMutex             // guards semaphores
-	semaphores map[string]chan struct{} // per-backend concurrency limiter (nil entry = unlimited)
+	transport     *http.Transport          // shared connection pool for all backends
+	mu            sync.RWMutex             // guards semaphores
+	semaphores    map[string]chan struct{} // per-backend concurrency limiter (nil entry = unlimited)
+	bufferedBytes atomic.Int64             // bytes currently held in proxy buffers
 }
 
 func New(version, buildMode string, cfg *config.Config, metrics *telemetry.Metrics, j *journal.Journal) *Server {
@@ -572,6 +573,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 		jsonError(w, "failed to encode request", http.StatusInternalServerError)
 		return
 	}
+	bytesHeld := int64(len(newBody))
+	s.bufferedBytes.Add(bytesHeld)
 
 	// ── Build & execute reverse proxy ──────────────────────────────────────
 	targetURL, err := url.Parse(backend.BaseURL)
@@ -586,6 +589,12 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 
 	w.Header().Set("X-Request-ID", rid)
 	s.metrics.ActiveRequests.Add(metricsCtx, 1, telemetry.BackendAttrs(backendID, realModel))
+	// Record gauges
+	s.metrics.RequestBodyBytesBuffered.Record(metricsCtx, float64(s.bufferedBytes.Load()))
+	if s.balancer != nil {
+		s.metrics.ActiveRequestsTotal.Record(metricsCtx, float64(s.balancer.TotalInFlight()))
+		s.metrics.AffinityCacheEntries.Record(metricsCtx, float64(s.balancer.AffinityCacheSize()))
+	}
 
 	// ── Capture: reserve a slot if the SIGUSR1 window is open ─────────────
 	// Reserved here (after successful validation) so that 400/404/500
@@ -605,8 +614,10 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	rp := &httputil.ReverseProxy{
 		Transport:      s.transport,
 		Director:       director(targetURL, backend, newBody, opts.pathOverride, routeHeaders(res)),
-		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx, lbGroup, lbAffKey), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
+		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx, lbGroup, lbAffKey, bytesHeld), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			s.bufferedBytes.Add(-bytesHeld)
+			s.metrics.RequestBodyBytesBuffered.Record(metricsCtx, float64(s.bufferedBytes.Load()))
 			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
 			elapsed := time.Since(t0).Seconds()
 			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, "error"))
@@ -888,7 +899,7 @@ func logMessageContent(rid string, body map[string]interface{}) {
 
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context, capCtx *captureCtx, lbGroup, lbAffKey string) func(*http.Response) error {
+func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context, capCtx *captureCtx, lbGroup, lbAffKey string, bytesHeld int64) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
 
@@ -925,6 +936,8 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 				parser:     parser,
 				tee:        teeWriter,
 				onClose: func() {
+					s.bufferedBytes.Add(-bytesHeld)
+					s.metrics.RequestBodyBytesBuffered.Record(ctx, float64(s.bufferedBytes.Load()))
 					parser.recordFinal()
 					elapsed := time.Since(t0).Seconds()
 					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
@@ -962,6 +975,8 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 				return err
 			}
 			elapsed := time.Since(t0).Seconds()
+			s.bufferedBytes.Add(-bytesHeld)
+			s.metrics.RequestBodyBytesBuffered.Record(ctx, float64(s.bufferedBytes.Load()))
 			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
 			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
