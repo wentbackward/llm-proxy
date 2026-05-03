@@ -435,7 +435,7 @@ func applyDefaults(cfg *Config) {
 			g.HealthCheck.IntervalSeconds = 10
 		}
 		if g.HealthCheck.TimeoutSeconds == 0 {
-			g.HealthCheck.TimeoutSeconds = 2
+			g.HealthCheck.TimeoutSeconds = 5
 		}
 		if g.HealthCheck.UnhealthyAfter == 0 {
 			g.HealthCheck.UnhealthyAfter = 3
@@ -824,7 +824,7 @@ func (c *Config) GetAliveConfig(group *GroupConfig) AliveConfig {
 		UnhealthyAfter:  3,
 		Probes: []AliveProbe{
 			{Type: "lightweight_chat", Path: "chat/completions", TimeoutSeconds: 5},
-			{Type: "http_get", Path: "health", TimeoutSeconds: 2},
+			{Type: "http_get", Path: "health", TimeoutSeconds: 5},
 		},
 	}
 
