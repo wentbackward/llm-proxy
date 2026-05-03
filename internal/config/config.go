@@ -774,7 +774,6 @@ func (c *Config) GetZeroContentDetection(route *Route) ZeroContentDetectionConfi
 
 // LoadBalancingConfig holds global defaults for load balancing monitoring.
 type LoadBalancingConfig struct {
-	Alive        AliveConfig        `yaml:"alive"`
 	Metrics      MetricsConfig      `yaml:"metrics"`
 	FlowTracking FlowTrackingConfig `yaml:"flow_tracking"`
 	Recovery     RecoveryConfig     `yaml:"recovery"`
@@ -816,66 +815,47 @@ type RecoveryConfig struct {
 	RampUpSec     int `yaml:"ramp_up_seconds"`     // default: 60
 }
 
-// GetAliveConfig resolves alive check config for a group,
-// applying the cascading resolution: per-group > global > defaults.
+// GetAliveConfig resolves alive check config for a group.
+// Alive probes are per-group — each group specifies its own probes.
+// Disabled by default (empty probes list). Operators must configure explicitly.
 func (c *Config) GetAliveConfig(group *GroupConfig) AliveConfig {
 	cfg := AliveConfig{
 		IntervalSeconds: 60,
 		UnhealthyAfter:  3,
-		Probes: []AliveProbe{
-			{Type: "lightweight_chat", Path: "chat/completions", TimeoutSeconds: 5},
-			{Type: "http_get", Path: "health", TimeoutSeconds: 5},
-		},
-	}
-
-	// Global defaults
-	glbl := c.LoadBalancing.Alive
-	if glbl.IntervalSeconds > 0 {
-		cfg.IntervalSeconds = glbl.IntervalSeconds
-	}
-	if glbl.UnhealthyAfter > 0 {
-		cfg.UnhealthyAfter = glbl.UnhealthyAfter
-	}
-	if len(glbl.Probes) > 0 {
-		cfg.Probes = applyProbeDefaults(glbl.Probes)
 	}
 
 	// Per-group override
-	if group != nil && group.Monitoring != nil && group.Monitoring.Alive != nil {
-		rt := group.Monitoring.Alive
-		if rt.IntervalSeconds > 0 {
-			cfg.IntervalSeconds = rt.IntervalSeconds
+	if group.Monitoring != nil && group.Monitoring.Alive != nil {
+		alive := group.Monitoring.Alive
+		if alive.Enabled != "" {
+			cfg.Enabled = alive.Enabled
 		}
-		if rt.UnhealthyAfter > 0 {
-			cfg.UnhealthyAfter = rt.UnhealthyAfter
+		if alive.IntervalSeconds > 0 {
+			cfg.IntervalSeconds = alive.IntervalSeconds
 		}
-		if len(rt.Probes) > 0 {
-			cfg.Probes = applyProbeDefaults(rt.Probes)
+		if alive.UnhealthyAfter > 0 {
+			cfg.UnhealthyAfter = alive.UnhealthyAfter
 		}
-	}
-	return cfg
-}
-
-// applyProbeDefaults fills in missing probe fields with sensible defaults.
-// Paths are relative so they append to base_url (RFC 3986) — the base_url
-// owns any version prefix like /v1/.
-func applyProbeDefaults(probes []AliveProbe) []AliveProbe {
-	out := make([]AliveProbe, len(probes))
-	for i, p := range probes {
-		out[i] = p
-		if p.Path == "" {
-			switch p.Type {
-			case "lightweight_chat":
-				out[i].Path = "chat/completions"
-			case "http_get":
-				out[i].Path = "health"
+		if len(alive.Probes) > 0 {
+			cfg.Probes = make([]AliveProbe, len(alive.Probes))
+			for i, p := range alive.Probes {
+				cfg.Probes[i] = p
+				if p.Path == "" {
+					switch p.Type {
+					case "lightweight_chat":
+						cfg.Probes[i].Path = "chat/completions"
+					case "http_get":
+						cfg.Probes[i].Path = "health"
+					}
+				}
+				if p.TimeoutSeconds == 0 {
+					cfg.Probes[i].TimeoutSeconds = 5
+				}
 			}
 		}
-		if p.TimeoutSeconds == 0 {
-			out[i].TimeoutSeconds = 5
-		}
 	}
-	return out
+
+	return cfg
 }
 
 // GetMetricsConfig resolves metrics scraping config for a group,
