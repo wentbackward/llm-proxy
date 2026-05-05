@@ -486,7 +486,11 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	if res != nil {
 		route = res.Route
 	}
-	dropEmptyMessages(cfg, route, backend, rid, body)
+	dropErr := dropEmptyMessages(cfg, route, backend, rid, body)
+	if dropErr != nil {
+		jsonError(w, "empty messages are blocked by your administrator", http.StatusBadRequest)
+		return
+	}
 
 	// ── L2: log transformation summary ─────────────────────────────────────
 	authType := "none"
@@ -1196,23 +1200,31 @@ func deepMergeInto(dst, src map[string]interface{}) {
 	}
 }
 
+// ErrEmptyRequest is returned when all user messages have empty content.
+// The caller should refuse the request with HTTP 400.
+var ErrEmptyRequest = errors.New("all user messages have empty content")
+
 // dropEmptyMessages removes messages with nil or empty content from the
 // messages array. Some clients (OpenClaw) send assistant messages with
 // content: null when the assistant makes tool_calls but produces no text.
 // Rather than normalizing to "" (which Together et al. reject), we drop
 // the message entirely when the toggle is enabled.
-func dropEmptyMessages(cfg *config.Config, route *config.Route, backend *config.Backend, rid string, body map[string]interface{}) {
+// Returns ErrEmptyRequest if all user messages have empty content,
+// signaling the caller to refuse with 400.
+
+func dropEmptyMessages(cfg *config.Config, route *config.Route, backend *config.Backend, rid string, body map[string]interface{}) error {
 	if !cfg.ShouldDropEmptyContent(route, backend) {
-		return
+		return nil
 	}
 
 	msgs, ok := body["messages"].([]interface{})
 	if !ok {
-		return
+		return nil
 	}
 
 	filtered := make([]interface{}, 0, len(msgs))
 	var dropped []int
+	userCount := 0
 	for i, raw := range msgs {
 		m, ok := raw.(map[string]interface{})
 		if !ok {
@@ -1220,18 +1232,31 @@ func dropEmptyMessages(cfg *config.Config, route *config.Route, backend *config.
 			continue
 		}
 		if isEmptyContent(m["content"]) {
+			if m["role"] == "user" {
+				userCount++
+			}
 			dropped = append(dropped, i)
 			continue
 		}
 		filtered = append(filtered, m)
+		if m["role"] == "user" {
+			userCount++
+		}
 	}
 
 	if len(dropped) == 0 {
-		return
+		return nil
 	}
 	body["messages"] = filtered
 	logger.Request("[%s] dropped %d message(s) with empty content", rid, len(dropped))
 	logger.Headers("[%s]   dropped indices: %v", rid, dropped)
+
+	// If all user messages were empty, refuse the request
+	if userCount == 0 && len(dropped) > 0 {
+		logger.Request("[%s] refusing: all user messages had empty content", rid)
+		return ErrEmptyRequest
+	}
+	return nil
 }
 
 // isEmptyContent checks whether a message's content field is effectively empty.

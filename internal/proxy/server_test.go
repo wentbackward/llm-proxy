@@ -1330,14 +1330,18 @@ func TestIsEmptyContent_MultimodalHasText(t *testing.T) {
 }
 
 func TestDropEmptyMessages_Disabled(t *testing.T) {
-	cfg := &config.Config{}
+	falseVal := false
+	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: &falseVal}}
 	body := map[string]interface{}{
 		"messages": []interface{}{
 			map[string]interface{}{"role": "user", "content": "hi"},
 			map[string]interface{}{"role": "assistant", "content": nil},
 		},
 	}
-	dropEmptyMessages(cfg, nil, nil, "test", body)
+	err := dropEmptyMessages(cfg, nil, nil, "test", body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	msgs := body["messages"].([]interface{})
 	if len(msgs) != 2 {
 		t.Errorf("disabled: expected 2 messages, got %d", len(msgs))
@@ -1346,7 +1350,7 @@ func TestDropEmptyMessages_Disabled(t *testing.T) {
 
 func TestDropEmptyMessages_RemovesNil(t *testing.T) {
 	trueVal := true
-	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: trueVal}}
+	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: &trueVal}}
 	body := map[string]interface{}{
 		"messages": []interface{}{
 			map[string]interface{}{"role": "user", "content": "hi"},
@@ -1354,7 +1358,10 @@ func TestDropEmptyMessages_RemovesNil(t *testing.T) {
 			map[string]interface{}{"role": "user", "content": "follow up"},
 		},
 	}
-	dropEmptyMessages(cfg, nil, nil, "test", body)
+	err := dropEmptyMessages(cfg, nil, nil, "test", body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	msgs := body["messages"].([]interface{})
 	if len(msgs) != 2 {
 		t.Errorf("expected 2 messages after dropping nil, got %d", len(msgs))
@@ -1363,7 +1370,7 @@ func TestDropEmptyMessages_RemovesNil(t *testing.T) {
 
 func TestDropEmptyMessages_RemovesEmptyString(t *testing.T) {
 	trueVal := true
-	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: trueVal}}
+	cfg := &config.Config{Server: config.ServerConfig{DropEmptyContent: &trueVal}}
 	body := map[string]interface{}{
 		"messages": []interface{}{
 			map[string]interface{}{"role": "user", "content": "hi"},
@@ -1371,7 +1378,10 @@ func TestDropEmptyMessages_RemovesEmptyString(t *testing.T) {
 			map[string]interface{}{"role": "user", "content": "again"},
 		},
 	}
-	dropEmptyMessages(cfg, nil, nil, "test", body)
+	err := dropEmptyMessages(cfg, nil, nil, "test", body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	msgs := body["messages"].([]interface{})
 	if len(msgs) != 2 {
 		t.Errorf("expected 2 messages after dropping empty string, got %d", len(msgs))
@@ -1388,7 +1398,7 @@ func TestDropEmptyMessages_Integration_GlobalEnabled(t *testing.T) {
 		Server: config.ServerConfig{
 			APIKey:              "test",
 			PassthroughUnrouted: true,
-			DropEmptyContent:    trueVal,
+			DropEmptyContent:    &trueVal,
 		},
 		Backends: []config.Backend{
 			{ID: "test", Type: "openai", BaseURL: backend.URL + "/v1/"},

@@ -869,22 +869,29 @@ func ptrBool(v bool) *bool {
 	return &v
 }
 
-func TestShouldDropEmptyContent_GlobalFalse(t *testing.T) {
+func TestShouldDropEmptyContent_DefaultTrue(t *testing.T) {
 	cfg := &Config{Server: ServerConfig{}}
-	if cfg.ShouldDropEmptyContent(nil, nil) {
-		t.Error("expected false when global is false")
+	if !cfg.ShouldDropEmptyContent(nil, nil) {
+		t.Error("expected true when global is nil (default)")
 	}
 }
 
 func TestShouldDropEmptyContent_GlobalTrue(t *testing.T) {
-	cfg := &Config{Server: ServerConfig{DropEmptyContent: true}}
+	cfg := &Config{Server: ServerConfig{DropEmptyContent: ptrBool(true)}}
 	if !cfg.ShouldDropEmptyContent(nil, nil) {
 		t.Error("expected true when global is true")
 	}
 }
 
+func TestShouldDropEmptyContent_GlobalFalse(t *testing.T) {
+	cfg := &Config{Server: ServerConfig{DropEmptyContent: ptrBool(false)}}
+	if cfg.ShouldDropEmptyContent(nil, nil) {
+		t.Error("expected false when global is false")
+	}
+}
+
 func TestShouldDropEmptyContent_BackendOverridesGlobal(t *testing.T) {
-	cfg := &Config{Server: ServerConfig{DropEmptyContent: true}}
+	cfg := &Config{Server: ServerConfig{DropEmptyContent: ptrBool(true)}}
 	backend := &Backend{DropEmptyContent: ptrBool(false)}
 	if cfg.ShouldDropEmptyContent(nil, backend) {
 		t.Error("expected false: backend should override global")
@@ -892,7 +899,7 @@ func TestShouldDropEmptyContent_BackendOverridesGlobal(t *testing.T) {
 }
 
 func TestShouldDropEmptyContent_RouteOverridesBackend(t *testing.T) {
-	cfg := &Config{Server: ServerConfig{DropEmptyContent: true}}
+	cfg := &Config{Server: ServerConfig{DropEmptyContent: ptrBool(true)}}
 	backend := &Backend{DropEmptyContent: ptrBool(true)}
 	route := &Route{DropEmptyContent: ptrBool(false)}
 	if cfg.ShouldDropEmptyContent(route, backend) {
@@ -901,7 +908,7 @@ func TestShouldDropEmptyContent_RouteOverridesBackend(t *testing.T) {
 }
 
 func TestShouldDropEmptyContent_RouteOverridesGlobalDirectly(t *testing.T) {
-	cfg := &Config{Server: ServerConfig{DropEmptyContent: false}}
+	cfg := &Config{Server: ServerConfig{DropEmptyContent: ptrBool(false)}}
 	route := &Route{DropEmptyContent: ptrBool(true)}
 	if !cfg.ShouldDropEmptyContent(route, nil) {
 		t.Error("expected true: route should override global even without backend")
@@ -909,7 +916,7 @@ func TestShouldDropEmptyContent_RouteOverridesGlobalDirectly(t *testing.T) {
 }
 
 func TestShouldDropEmptyContent_NilPointerInherits(t *testing.T) {
-	cfg := &Config{Server: ServerConfig{DropEmptyContent: true}}
+	cfg := &Config{Server: ServerConfig{DropEmptyContent: ptrBool(true)}}
 	backend := &Backend{DropEmptyContent: nil} // inherits
 	if !cfg.ShouldDropEmptyContent(nil, backend) {
 		t.Error("expected true: nil backend pointer should fall through to global")
