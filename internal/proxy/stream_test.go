@@ -225,7 +225,7 @@ func TestInterceptedBody_OnCloseCalled(t *testing.T) {
 	body := &interceptedBody{
 		ReadCloser: io.NopCloser(strings.NewReader("")),
 		parser:     makeParser(t, "openai"),
-		onClose:    func() { called = true },
+		onClose:    func(error) { called = true },
 	}
 	body.Close()
 	if !called {
@@ -238,7 +238,7 @@ func TestInterceptedBody_OnCloseCalledOnce(t *testing.T) {
 	body := &interceptedBody{
 		ReadCloser: io.NopCloser(strings.NewReader("")),
 		parser:     makeParser(t, "openai"),
-		onClose:    func() { count++ },
+		onClose:    func(error) { count++ },
 	}
 	body.Close()
 	body.Close()

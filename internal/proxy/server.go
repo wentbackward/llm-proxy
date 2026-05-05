@@ -935,7 +935,7 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 				ReadCloser: resp.Body,
 				parser:     parser,
 				tee:        teeWriter,
-				onClose: func() {
+				onClose: func(readErr error) {
 					s.bufferedBytes.Add(-bytesHeld)
 					s.metrics.RequestBodyBytesBuffered.Record(ctx, float64(s.bufferedBytes.Load()))
 					parser.recordFinal()
@@ -944,9 +944,19 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
 					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 					if s.balancer != nil {
-						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
-						// Invalidate pin on 5xx — backend is degrading
-						if resp.StatusCode >= 500 {
+						// Detect timeout: context cancellation or read timeout
+						var isTimeout bool
+						if readErr != nil {
+							if netErr, ok := readErr.(interface{ Timeout() bool }); ok {
+								isTimeout = netErr.Timeout()
+							}
+							if ctx.Err() != nil {
+								isTimeout = true
+							}
+						}
+						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, isTimeout, 0)
+						// Invalidate pin on 5xx, but NOT on timeout
+						if resp.StatusCode >= 500 && !isTimeout {
 							s.balancer.InvalidatePin(lbGroup, lbAffKey)
 						}
 					}

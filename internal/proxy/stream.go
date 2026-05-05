@@ -418,12 +418,16 @@ type interceptedBody struct {
 	io.ReadCloser
 	parser    streamParser
 	tee       io.Writer
-	onClose   func()
+	onClose   func(error)
 	closeOnce sync.Once
+	readErr   error
 }
 
 func (b *interceptedBody) Read(p []byte) (n int, err error) {
 	n, err = b.ReadCloser.Read(p)
+	if err != nil {
+		b.readErr = err
+	}
 	if n > 0 {
 		b.parser.feed(p[:n])
 		if b.tee != nil {
@@ -436,7 +440,7 @@ func (b *interceptedBody) Read(p []byte) (n int, err error) {
 func (b *interceptedBody) Close() error {
 	b.closeOnce.Do(func() {
 		if b.onClose != nil {
-			b.onClose()
+			b.onClose(b.readErr)
 		}
 	})
 	return b.ReadCloser.Close()
