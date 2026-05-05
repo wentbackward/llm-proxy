@@ -869,10 +869,10 @@ func ptrBool(v bool) *bool {
 	return &v
 }
 
-func TestShouldDropEmptyContent_DefaultTrue(t *testing.T) {
+func TestShouldDropEmptyContent_DefaultFalse(t *testing.T) {
 	cfg := &Config{Server: ServerConfig{}}
-	if !cfg.ShouldDropEmptyContent(nil, nil) {
-		t.Error("expected true when global is nil (default)")
+	if cfg.ShouldDropEmptyContent(nil, nil) {
+		t.Error("expected false when global is nil (default)")
 	}
 }
 

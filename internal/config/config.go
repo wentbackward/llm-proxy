@@ -38,7 +38,7 @@ type ServerConfig struct {
 	AllowPlaintext      bool            `yaml:"allow_plaintext"`      // required to start without TLS; appropriate only on Tailscale/private networks
 	TLS                 TLSConfig       `yaml:"tls"`
 	Transport           TransportConfig `yaml:"transport"`
-	DropEmptyContent    *bool           `yaml:"drop_empty_content"` // globally strip nil/empty-content messages; default true
+	DropEmptyContent    *bool           `yaml:"drop_empty_content"` // globally strip nil/empty-content messages; default false
 }
 
 type PrometheusConfig struct {
@@ -623,7 +623,7 @@ func (c *Config) GroupBackends(group string) []*Backend {
 
 // ShouldDropEmptyContent resolves the cascading toggle for stripping empty
 // messages. Priority: route > backend > global. A nil pointer means "inherit";
-// an explicit boolean overrides the parent level. Default: enabled.
+// an explicit boolean overrides the parent level. Default: disabled.
 func (c *Config) ShouldDropEmptyContent(route *Route, backend *Backend) bool {
 	// Route wins
 	if route != nil && route.DropEmptyContent != nil {
@@ -633,11 +633,11 @@ func (c *Config) ShouldDropEmptyContent(route *Route, backend *Backend) bool {
 	if backend != nil && backend.DropEmptyContent != nil {
 		return *backend.DropEmptyContent
 	}
-	// Global — nil means use default (true)
+	// Global — nil means use default (false)
 	if c.Server.DropEmptyContent != nil {
 		return *c.Server.DropEmptyContent
 	}
-	return true
+	return false
 }
 
 // --- Request Defenders ---
