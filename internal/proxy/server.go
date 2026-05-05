@@ -618,7 +618,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, opts proxy
 	rp := &httputil.ReverseProxy{
 		Transport:      s.transport,
 		Director:       director(targetURL, backend, newBody, opts.pathOverride, routeHeaders(res)),
-		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, capCtx, lbGroup, lbAffKey, bytesHeld), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
+		ModifyResponse: s.modifyResponse(rid, backendID, modelName, realModel, r.URL.Path, backend.Type, backend.TimeoutSeconds, isStreaming, t0, metricsCtx, r.Context(), capCtx, lbGroup, lbAffKey, bytesHeld), //nolint:bodyclose // ReverseProxy owns the response body; ModifyResponse wraps or reads-and-restores it, and the framework closes it client-side.
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			s.bufferedBytes.Add(-bytesHeld)
 			s.metrics.RequestBodyBytesBuffered.Record(metricsCtx, float64(s.bufferedBytes.Load()))
@@ -903,7 +903,7 @@ func logMessageContent(rid string, body map[string]interface{}) {
 
 // modifyResponse returns a ModifyResponse function that instruments the
 // upstream response with telemetry.
-func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, ctx context.Context, capCtx *captureCtx, lbGroup, lbAffKey string, bytesHeld int64) func(*http.Response) error {
+func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, backendType string, timeoutSec int, streaming bool, t0 time.Time, metricsCtx, reqCtx context.Context, capCtx *captureCtx, lbGroup, lbAffKey string, bytesHeld int64) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		statusStr := fmt.Sprintf("%d", resp.StatusCode)
 
@@ -920,9 +920,9 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			var parser streamParser
 			var ssep *sseParser
 			if backendType == "ollama" {
-				parser = newOllamaParser(backendID, realModel, t0, s.metrics, ctx)
+				parser = newOllamaParser(backendID, realModel, t0, s.metrics, metricsCtx)
 			} else {
-				ssep = newSSEParser(backendID, realModel, backendType, t0, s.metrics, ctx)
+				ssep = newSSEParser(backendID, realModel, backendType, t0, s.metrics, metricsCtx)
 				if logger.Get() >= logger.LevelContent {
 					ssep.captureContent = true
 				}
@@ -941,22 +941,24 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 				tee:        teeWriter,
 				onClose: func(readErr error) {
 					s.bufferedBytes.Add(-bytesHeld)
-					s.metrics.RequestBodyBytesBuffered.Record(ctx, float64(s.bufferedBytes.Load()))
+					s.metrics.RequestBodyBytesBuffered.Record(metricsCtx, float64(s.bufferedBytes.Load()))
 					parser.recordFinal()
 					elapsed := time.Since(t0).Seconds()
-					s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
-					s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
-					s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
+					s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
+					s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
+					s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 					if s.balancer != nil {
-						// Detect timeout: context cancellation or read timeout
+						// Detect timeout: context cancellation or read timeout.
+						// reqCtx is the cancellable request context (client disconnect).
+						// metricsCtx is WithoutCancel — not useful for this check.
 						var isTimeout bool
 						if readErr != nil {
 							if netErr, ok := readErr.(interface{ Timeout() bool }); ok {
 								isTimeout = netErr.Timeout()
 							}
-							if ctx.Err() != nil {
-								isTimeout = true
-							}
+						}
+						if reqCtx.Err() != nil {
+							isTimeout = true
 						}
 						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, isTimeout, 0)
 						// Invalidate pin on 5xx, but NOT on timeout
@@ -990,10 +992,10 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			}
 			elapsed := time.Since(t0).Seconds()
 			s.bufferedBytes.Add(-bytesHeld)
-			s.metrics.RequestBodyBytesBuffered.Record(ctx, float64(s.bufferedBytes.Load()))
-			s.metrics.ActiveRequests.Add(ctx, -1, telemetry.BackendAttrs(backendID, realModel))
-			s.metrics.RequestDuration.Record(ctx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
-			s.metrics.RequestsTotal.Add(ctx, 1, telemetry.Attrs(backendID, realModel, statusStr))
+			s.metrics.RequestBodyBytesBuffered.Record(metricsCtx, float64(s.bufferedBytes.Load()))
+			s.metrics.ActiveRequests.Add(metricsCtx, -1, telemetry.BackendAttrs(backendID, realModel))
+			s.metrics.RequestDuration.Record(metricsCtx, elapsed, telemetry.Attrs(backendID, realModel, statusStr))
+			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 			if s.balancer != nil {
 				s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
 				// Invalidate pin on 5xx — backend is degrading
@@ -1010,7 +1012,7 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			}
 
 			if resp.StatusCode == http.StatusOK {
-				extractNonStreamingUsage(data, backendID, realModel, backendType, s.metrics, ctx)
+				extractNonStreamingUsage(data, backendID, realModel, backendType, s.metrics, metricsCtx)
 			}
 
 			// L4: log non-streaming response content
