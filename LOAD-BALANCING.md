@@ -115,7 +115,7 @@ routes:
     health_check:
       path: /v1/models
       interval_seconds: 10
-      timeout_seconds: 2
+      timeout_seconds: 5
       unhealthy_after: 3         # consecutive failures before marking down
     metrics_scrape:
       enabled: auto              # auto | true | false
@@ -391,14 +391,14 @@ func pickLeastLoaded(pool []*BackendState) *BackendState {
 
 The proxy tracks three independent signals per backend:
 
-### 1. Alive (OR-based)
+### 1. Alive (OR-based, per-group, disabled by default)
 
-Determines whether the backend process is reachable. Two probes, either succeeding is sufficient:
+Determines whether the backend process is reachable. Configured per-group under `groups.<name>.monitoring.alive`. Probes are OR-combined — any one succeeding marks the backend alive:
 
 - **Lightweight chat** — POST `/v1/chat/completions` with `max_tokens: 1`. Validates the full inference pipeline.
 - **HTTP GET** — GET `/health` (or any configured path). Validates HTTP connectivity.
 
-Independent from metrics scraping. Runs on its own goroutine and interval (default: 60s). A backend must be alive to receive traffic.
+Disabled by default. Each group must explicitly configure its probes. Independent from metrics scraping. Runs on its own goroutine and interval (default: 60s). A backend must be alive to receive traffic.
 
 ### 2. Quality (rolling window)
 
@@ -442,7 +442,7 @@ back to the local `InFlightLocal` counter for that backend.
 
 | Scenario | Behavior |
 |---|---|
-| All backends unhealthy | Return 503 to client. Don't queue. |
+| All backends unhealthy | Force-include first backend as last resort. Risk one failed request over client denial (503). |
 | Pinned backend dies mid-session | Next request from that affinity key re-pins to a healthy peer. Cache miss costs one prefill. |
 | Pinned backend healthy but overloaded (`isOverloaded`) | Bail to least-loaded peer for this request. Don't update the affinity entry — it remains pinned for when the original recovers. |
 | All backends overloaded | Pick least-bad (smallest `load_score`). Don't 503; the queue at the backend is faster than tearing down and retrying. |
@@ -721,7 +721,7 @@ routes:
       # scrape doubles as the health signal — this block is ignored.
       path: /models                # default; hikyaku does not auto-add /v1/
       interval_seconds: 10
-      timeout_seconds: 2
+      timeout_seconds: 5
       unhealthy_after: 3
     metrics_scrape:
       enabled: auto                # auto = probe and use if available

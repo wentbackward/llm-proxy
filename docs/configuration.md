@@ -389,18 +389,10 @@ When a route needs to distribute traffic across multiple backends, define a **gr
 ### Top-level `load_balancing`
 
 Global defaults for monitoring and recovery behavior. Per-group overrides are applied on top.
+Alive probes are configured per-group (see below) and are disabled by default.
 
 ```yaml
 load_balancing:
-  alive:
-    interval_seconds: 60
-    unhealthy_after: 3
-    probes:
-      - type: lightweight_chat
-        timeout_seconds: 5
-      - type: http_get
-        path: /health
-        timeout_seconds: 2
   metrics:
     startup_retries: 3
     startup_backoff_seconds: 5
@@ -431,7 +423,7 @@ groups:
     health_check:
       path: /v1/models             # default
       interval_seconds: 10         # default
-      timeout_seconds: 2           # default
+      timeout_seconds: 5           # default
       unhealthy_after: 3           # default
     metrics_scrape:
       enabled: auto                # auto | true | false
@@ -502,11 +494,11 @@ This is the primary health signal. A backend that serves messages is alive, rega
 
 **Health probes (GET).** Periodic GET requests to a configurable path (default: `models`, resolving to `{base_url}models`). Lightweight — no tokens consumed, no KV cache pressure. Marks backends unhealthy after `unhealthy_after` consecutive failures (default: 3). Can be disabled entirely with `health_check.enabled: false`.
 
-**Alive probes (OR-based).** More invasive checks that validate the full inference pipeline. Configured per-group under `load_balancing.alive.probes`. Two types:
+**Alive probes (OR-based, per-group).** More invasive checks that validate the full inference pipeline. Configured per-group under `groups.<name>.monitoring.alive`. Disabled by default — must be explicitly enabled. Two probe types:
 - `lightweight_chat` — sends a minimal chat completion (`max_tokens: 1`) to exercise the full pipeline
 - `http_get` — GET to an arbitrary path (e.g., `/health`)
 
-Either probe succeeding means the backend is alive. Can be disabled with `alive.enabled: false`.
+Either probe succeeding means the backend is alive. Disabled by default; configure `enabled: true` and define probes per-group.
 
 **Quality & capacity.** Rolling window of flow stats (TTFT, error rate, stall rate) and scraped metrics (KV cache %, running/queued requests). These feed the composite load score for `sticky_least_loaded` — they influence *which* backend gets picked, not *whether* it's healthy.
 
@@ -539,31 +531,32 @@ Both probe systems can be disabled entirely:
 ```yaml
 groups:
   my-group:
-    health_check:
-      enabled: false
     monitoring:
       alive:
-        enabled: false
+        enabled: true                  # disabled by default
+        interval_seconds: 60
+        unhealthy_after: 3
+        probes:
+          - type: lightweight_chat
+            timeout_seconds: 5
+          - type: http_get
+            path: health
+            timeout_seconds: 5
 ```
 
-With no probes, health is driven solely by real request outcomes. A lightweight **passive recovery** loop runs instead: after a cooldown period (configured via `recovery.retry_delay_seconds`, default 30s), unhealthy backends are flipped back to healthy and given a chance with real traffic. If those requests succeed, the backend stays; if they fail (3 strikes), it goes back to unhealthy.
+With no probes (default), health is driven solely by real request outcomes. A lightweight **passive recovery** loop runs instead: after a cooldown period (configured via `recovery.retry_delay_seconds`, default 30s), unhealthy backends are flipped back to healthy and given a chance with real traffic. If those requests succeed, the backend stays; if they fail (3 strikes), it goes back to unhealthy.
 
 This mode is suitable for backends that don't expose `/health` or `/models`, or where operators want to avoid synthetic traffic entirely.
 
 #### Configuration reference
 
 ```yaml
-load_balancing:                        # global defaults
-  alive:
-    enabled: true                      # true | false (default: true)
-    interval_seconds: 60
-    unhealthy_after: 3
-    probes:
-      - type: lightweight_chat
-        timeout_seconds: 5
-      - type: http_get
-        path: /health
-        timeout_seconds: 2
+load_balancing:                        # global defaults (alive is per-group)
+  metrics:
+    startup_retries: 3
+    startup_backoff_seconds: 5
+    retry_interval_seconds: 120
+    scrape_timeout_seconds: 3
   recovery:
     retry_delay_seconds: 30            # cooldown before retrying unhealthy backends
     ramp_up_seconds: 60                # ramp-up phase after recovery
@@ -574,12 +567,38 @@ groups:
       enabled: true                    # true | false (default: true)
       path: models                     # relative path, resolved against base_url
       interval_seconds: 10
-      timeout_seconds: 2
-      unhealthy_after: 3
+      timeout_seconds: 5               # increased from 2s to tolerate load
+      unhealthy_after: 3               # consecutive failures before marking down
     monitoring:
       alive:
-        enabled: false                 # override: disable alive probes for this group
+        enabled: true                  # disabled by default
+        interval_seconds: 60
+        unhealthy_after: 3
+        probes:
+          - type: lightweight_chat     # POST /v1/chat/completions, max_tokens=1
+            timeout_seconds: 5
+          - type: http_get             # GET {base_url}/health
+            path: health
+            timeout_seconds: 5
 ```
+
+#### Defenders
+
+```yaml
+server:
+  drop_empty_content: true             # refuse (400) requests with empty/null message content
+  defenders:
+    loop_detection:
+      consecutive_threshold: 3
+      window_seconds: 60
+      action: refuse_429
+    zero_content_detection:
+      min_user_content_chars: 10
+      min_total_input_tokens: 1000
+      action: refuse_400
+```
+
+Defenders are **disabled by default**. Each must be explicitly enabled.
 
 #### Metrics retry
 

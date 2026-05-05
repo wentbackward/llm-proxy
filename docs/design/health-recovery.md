@@ -19,9 +19,9 @@ Three independent signals, each answering a different question:
 | **Quality** | How well is it performing? | Scraped `/metrics` + message flow stats | Fast (5s) |
 | **Capacity** | Should we send it more work right now? | Queue depth, KV cache, in-flight count | Real-time |
 
-## Signal 1: Alive Check (OR-based)
+## Signal 1: Alive Check (OR-based, per-group, disabled by default)
 
-A backend is "alive" if **either** of these succeeds:
+Configured per-group under `groups.<name>.monitoring.alive`. Disabled by default — operators must explicitly enable probes for each group. A backend is "alive" if **either** of these succeeds:
 
 ```
 alive = (lightweight_probe_succeeds) OR (health_endpoint_succeeds)
@@ -29,7 +29,7 @@ alive = (lightweight_probe_succeeds) OR (health_endpoint_succeeds)
 
 **Lightweight probe**: POST to `/v1/chat/completions` with `max_tokens: 1`, a 3-character message, and an empty system prompt. Minimal token cost, validates the full inference pipeline (tokenize → schedule → decode 1 token → return). Timeout: 5s (independent of request timeout).
 
-**Health endpoint**: GET `/health` (vLLM) or `/v1/models` (generic). Validates HTTP stack. Timeout: 2s (independent of request timeout).
+**Health endpoint**: GET `/health` (vLLM) or `/v1/models` (generic). Validates HTTP stack. Timeout: 5s (independent of request timeout).
 
 If **neither** succeeds → backend is truly dead. Exclude from pool.
 If **either** succeeds → backend is alive. Proceed to quality assessment.
@@ -137,20 +137,10 @@ After 3 failures, fall back to health-only mode BUT **keep trying** `/metrics` p
 
 ### Top-level: `load_balancing` block (global defaults)
 
+Alive probes are configured per-group (see below), not globally.
+
 ```yaml
 load_balancing:
-  # Alive checks
-  alive:
-    interval_seconds: 60
-    unhealthy_after: 3
-    probes:
-      - type: lightweight_chat
-        path: /v1/chat/completions
-        timeout_seconds: 5
-      - type: http_get
-        path: /health
-        timeout_seconds: 2
-
   # Metrics scraping
   metrics:
     startup_retries: 3
@@ -177,26 +167,28 @@ groups:
   coding-group:
     strategy: sticky_least_loaded
     # ...
-    load_balancing:
+    monitoring:
       flow_tracking:
         window_mode: fixed
         window_fixed_seconds: 600  # long window for heavy coding workloads
       alive:
+        enabled: true
         interval_seconds: 120      # slower alive checks (less noisy)
         probes:
           - type: lightweight_chat
             timeout_seconds: 10    # heavier probe for complex models
           - type: http_get
-            timeout_seconds: 3
+            timeout_seconds: 5
 
   chat-group:
     strategy: sticky_least_loaded
     # ...
-    load_balancing:
+    monitoring:
       flow_tracking:
         window_mode: fixed
         window_fixed_seconds: 90   # quick reaction for bursty chat
       alive:
+        enabled: true
         interval_seconds: 30       # faster detection
 ```
 

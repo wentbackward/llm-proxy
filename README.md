@@ -180,7 +180,7 @@ The **default backend** is the one marked `default: true` in its config, or the 
 
 Instead of pinning a route to a single backend, use `backend_group:` to spread traffic across a named group. The proxy supports four strategies — `sticky_least_loaded` (pins sessions for KV-cache locality), `least_loaded`, `round_robin`, and `single`.
 
-**Ground-truth health.** Real request outcomes drive backend health: 3 consecutive failures mark a backend unhealthy; any success recovers it. Probes complement this by catching issues during quiet periods. All probes can be disabled — the proxy works on traffic alone.
+**Ground-truth health.** Real request outcomes drive backend health: 3 consecutive failures mark a backend unhealthy; any success recovers it. Probes complement this by catching issues during quiet periods. If a real request succeeded within the last 60s, probe failures are ignored (oscillation prevention). All probes can be disabled — the proxy works on traffic alone.
 
 **Failover migration.** When a pinned backend fails (connection error or 5xx), the affinity pin is invalidated and the backend excluded for a short cooldown. Next request migrates to a healthy peer. Timeouts are tolerated — they mean the backend is busy, not dead.
 

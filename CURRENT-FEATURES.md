@@ -22,15 +22,14 @@
 - **Config syntax** — list and map formats supported, mixed-format detection with clear errors
 
 ## Health & Recovery
-- **Three-layer health model**:
-  - **Alive** — OR-based probes (lightweight_chat or HTTP GET)
-  - **Quality** — rolling window of TTFT, error rate, p95
-  - **Capacity** — scraped metrics (KV cache %, running/waiting requests) + in-flight
+- **Per-group alive probes** — configured under `groups.<name>.monitoring.alive`, disabled by default. OR-based probes (lightweight_chat or HTTP GET).
 - **Ground-truth health** — real request outcomes drive health state (3 strikes → unhealthy)
+- **Oscillation prevention** — probe failures ignored if a real request succeeded within 60s (`LastSuccessAt`)
 - **Innocent until proven guilty** — backends with in-flight requests immune to probe demotion
 - **Graduated recovery** — ramp-up phase on recovery, affinity-aware (no new pins during warm-up)
 - **Failover migration** — pin invalidated on connection error or 5xx, backend excluded for 10s cooldown
-- **Timeout tolerance** — timeouts don't trigger cooldown or health penalty (backend busy, not dead)
+- **Timeout tolerance** — timeouts don't trigger cooldown or health penalty (backend busy, not dead). Applies to both streaming and non-streaming paths.
+- **Last-resort routing** — when all backends unhealthy, force-include first backend rather than 503
 - **Passive recovery** — when all probes disabled, periodic re-admission after cooldown
 - **Probe knobs** — `health_check.enabled` and `alive.enabled` (true/false), fully zero-probe capable
 
@@ -44,7 +43,7 @@
 ## Defenders
 - **Loop detection** — catches repeated identical requests from agent retry loops
 - **Zero-content detection** — rejects trivial user content wrapped in massive system/tool defs
-- **Drop empty content** — strips malformed messages with empty content
+- **Drop empty content** — refuses (400) any request containing messages with nil/empty content. Does not strip or mutate. Opt-in (`server.drop_empty_content: true`). Refusal: "empty messages are blocked by your administrator"
 
 ## Security
 - **TLS enforcement** — refuses to start without TLS unless explicitly opted in
