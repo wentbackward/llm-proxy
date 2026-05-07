@@ -961,9 +961,16 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 							isTimeout = true
 						}
 						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, isTimeout, 0)
-						// Invalidate pin on 5xx or 404 (model unavailable), but NOT on timeout
-						if (resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound) && !isTimeout {
-							s.balancer.InvalidatePin(lbGroup, lbAffKey)
+						// Invalidate pin based on group failover config (5xx always + configured codes)
+						if !isTimeout && lbGroup != "" {
+							if grp, ok := s.cfg.Load().Groups[lbGroup]; ok && grp.ShouldFailoverOnCode(resp.StatusCode) {
+								s.balancer.InvalidatePin(lbGroup, lbAffKey)
+							}
+						} else if !isTimeout {
+							// No group configured — 5xx always triggers failover
+							if resp.StatusCode >= 500 {
+								s.balancer.InvalidatePin(lbGroup, lbAffKey)
+							}
 						}
 					}
 					logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs stream=true",
@@ -998,9 +1005,16 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 			if s.balancer != nil {
 				s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
-				// Invalidate pin on 5xx or 404 (model unavailable)
-				if resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound {
-					s.balancer.InvalidatePin(lbGroup, lbAffKey)
+				// Invalidate pin based on group failover config (5xx always + configured codes)
+				if lbGroup != "" {
+					if grp, ok := s.cfg.Load().Groups[lbGroup]; ok && grp.ShouldFailoverOnCode(resp.StatusCode) {
+						s.balancer.InvalidatePin(lbGroup, lbAffKey)
+					}
+				} else {
+					// No group configured — 5xx always triggers failover
+					if resp.StatusCode >= 500 {
+						s.balancer.InvalidatePin(lbGroup, lbAffKey)
+					}
 				}
 			}
 			logger.Request("[%s] POST %s model=%s→%s backend=%s status=%s dur=%.3fs",

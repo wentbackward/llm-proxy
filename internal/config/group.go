@@ -2,12 +2,13 @@ package config
 
 // GroupConfig defines load-balancing behavior for a named group of backends.
 type GroupConfig struct {
-	Strategy      string                 `yaml:"strategy"` // sticky_least_loaded | least_loaded | round_robin | single
-	Affinity      AffinityConfig         `yaml:"affinity"`
-	Overload      OverloadConfig         `yaml:"overload"`
-	HealthCheck   HealthCheckConfig      `yaml:"health_check"`
-	MetricsScrape MetricsScrapeConfig    `yaml:"metrics_scrape"`
-	Monitoring    *GroupMonitoringConfig `yaml:"monitoring"`
+	Strategy              string                 `yaml:"strategy"` // sticky_least_loaded | least_loaded | round_robin | single
+	Affinity              AffinityConfig         `yaml:"affinity"`
+	Overload              OverloadConfig         `yaml:"overload"`
+	HealthCheck           HealthCheckConfig      `yaml:"health_check"`
+	MetricsScrape         MetricsScrapeConfig    `yaml:"metrics_scrape"`
+	Monitoring            *GroupMonitoringConfig `yaml:"monitoring"`
+	FailoverOnStatusCodes []int                  `yaml:"failover_on_status_codes"` // HTTP codes that trigger pin invalidation + cooldown
 }
 
 // AffinityConfig controls prefix-cache affinity within a group.
@@ -92,4 +93,21 @@ func (g *GroupConfig) GetScrapePath() string {
 		return g.MetricsScrape.Path
 	}
 	return "/metrics"
+}
+
+// ShouldFailoverOnCode returns true if the given HTTP status code should
+// trigger pin invalidation and cooldown. 5xx always triggers failover.
+// Additional codes are configured via failover_on_status_codes.
+func (g *GroupConfig) ShouldFailoverOnCode(code int) bool {
+	// 5xx always triggers failover (server error = backend broken)
+	if code >= 500 && code < 600 {
+		return true
+	}
+	// Check configured codes
+	for _, c := range g.FailoverOnStatusCodes {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
