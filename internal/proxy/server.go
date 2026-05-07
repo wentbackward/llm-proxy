@@ -961,8 +961,8 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 							isTimeout = true
 						}
 						s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, isTimeout, 0)
-						// Invalidate pin on 5xx, but NOT on timeout
-						if resp.StatusCode >= 500 && !isTimeout {
+						// Invalidate pin on 5xx or 404 (model unavailable), but NOT on timeout
+						if (resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound) && !isTimeout {
 							s.balancer.InvalidatePin(lbGroup, lbAffKey)
 						}
 					}
@@ -998,8 +998,8 @@ func (s *Server) modifyResponse(rid, backendID, virtualModel, realModel, path, b
 			s.metrics.RequestsTotal.Add(metricsCtx, 1, telemetry.Attrs(backendID, realModel, statusStr))
 			if s.balancer != nil {
 				s.balancer.CompleteAndDecr(backendID, resp.StatusCode == http.StatusOK, false, 0)
-				// Invalidate pin on 5xx — backend is degrading
-				if resp.StatusCode >= 500 {
+				// Invalidate pin on 5xx or 404 (model unavailable)
+				if resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound {
 					s.balancer.InvalidatePin(lbGroup, lbAffKey)
 				}
 			}
